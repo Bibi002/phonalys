@@ -2,13 +2,15 @@
 
 Guide destiné au praticien. Phonalys fonctionne entièrement chez vous : aucun compte en ligne, aucune donnée envoyée à l'éditeur.
 
+Remplacez `<version>` par le numéro de la version téléchargée (par exemple `0.1.1`).
+
 ## 1. Choisir son installation
 
 | Situation | À télécharger |
 |---|---|
-| **Un seul ordinateur** (Windows) | `Phonalys_0.1.0_x64-setup.exe` (ou `Phonalys_0.1.0_x64_en-US.msi` pour un déploiement géré) |
+| **Un seul ordinateur** (Windows) | `Phonalys_<version>_x64-setup.exe` (ou `Phonalys_<version>_x64_en-US.msi` pour un déploiement géré) |
 | **Un seul ordinateur** (Linux) | `.deb` (Debian, Ubuntu), `.rpm` (Fedora, openSUSE) ou `.AppImage` (toutes distributions) |
-| **Ordinateur et téléphones ou tablettes** | En plus : le serveur du cabinet, `phonalys-server-0.1.0-windows-x64.zip` ou `phonalys-server-0.1.0-linux-x64.tar.gz`, sur la machine qui reste allumée au cabinet |
+| **Ordinateur et téléphones ou tablettes** | En plus : le serveur du cabinet, `phonalys-server-<version>-windows-x64.zip` ou `phonalys-server-<version>-linux-x64.tar.gz`, sur la machine qui reste allumée au cabinet |
 
 L'application de bureau seule n'est joignable que depuis l'ordinateur où elle est installée. Pour utiliser un téléphone ou une tablette, il faut le serveur du cabinet (section 4).
 
@@ -16,12 +18,12 @@ L'application de bureau seule n'est joignable que depuis l'ordinateur où elle e
 
 Avant d'installer, comparez l'empreinte du fichier avec celle de `SHA256SUMS.txt`, publié avec la version.
 
-- Windows (PowerShell) : `Get-FileHash .\Phonalys_0.1.0_x64-setup.exe`
+- Windows (PowerShell) : `Get-FileHash .\Phonalys_<version>_x64-setup.exe`
 - Linux : `sha256sum -c SHA256SUMS.txt --ignore-missing`
 
 Si l'empreinte diffère, **n'installez pas** le fichier.
 
-> **Version 0.1.0 non signée.** Windows affichera « Windows a protégé votre ordinateur » : cliquez sur « Informations complémentaires », puis « Exécuter quand même », **seulement** si l'empreinte est correcte. Les versions suivantes seront signées.
+> **Versions actuelles non signées.** Windows affichera « Windows a protégé votre ordinateur » : cliquez sur « Informations complémentaires », puis « Exécuter quand même », **seulement** si l'empreinte est correcte. Une version signée suivra.
 
 ## 3. Premier démarrage
 

@@ -2993,7 +2993,7 @@ dependencies = [
 
 [[package]]
 name = "phonalys-ai"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hex",
  "rustls",
@@ -3008,7 +3008,7 @@ dependencies = [
 
 [[package]]
 name = "phonalys-auth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "data-encoding",
@@ -3025,7 +3025,7 @@ dependencies = [
 
 [[package]]
 name = "phonalys-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hex",
  "hmac 0.12.1",
@@ -3040,7 +3040,7 @@ dependencies = [
 
 [[package]]
 name = "phonalys-crypto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -3054,7 +3054,7 @@ dependencies = [
 
 [[package]]
 name = "phonalys-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "phonalys-auth",
@@ -3071,7 +3071,7 @@ dependencies = [
 
 [[package]]
 name = "phonalys-psychometrics"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libm",
  "serde",
@@ -3081,7 +3081,7 @@ dependencies = [
 
 [[package]]
 name = "phonalys-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "axum-server",
@@ -3112,7 +3112,7 @@ dependencies = [
 
 [[package]]
 name = "phonalys-vault"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phonalys-core",
  "phonalys-crypto",
@@ -3128,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "phonalys-webauthn"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "ciborium",
