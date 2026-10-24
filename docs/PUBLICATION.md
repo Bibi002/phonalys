@@ -43,6 +43,10 @@ Les certificats EV récents sont souvent livrés sur une clé matérielle ou dan
 
 ## Ce qui reste à faire
 
-- **Mises à jour automatiques** : pas encore intégrées. Elles exigent une paire de clés de signature des mises à jour que **vous** générerez (`cargo tauri signer generate`) et dont la clé privée n'ira que dans un secret du dépôt.
+- **Mises à jour automatiques** : pas encore intégrées, volontairement. Il vous faut d'abord trancher deux points :
+  1. **Où publier les mises à jour.** Le dépôt est privé : les postes des clients ne peuvent pas lire ses releases. Il faut une adresse publique en HTTPS (un site à vous, ou un second dépôt public ne contenant que les installateurs et le fichier `latest.json`).
+  2. **Automatique ou manuel.** Pour un logiciel qui garde des dossiers de santé, une mise à jour silencieuse est un risque autant qu'une protection : si votre compte de publication est compromis, tous les cabinets reçoivent le code de l'attaquant. Proposition : l'application **signale** la nouvelle version et le praticien choisit quand l'installer.
+
+  Une fois ces choix faits, il restera à générer la paire de clés de signature des mises à jour (`cargo tauri signer generate`) : vous la générez, la clé privée va seulement dans un secret du dépôt, la clé publique dans `tauri.conf.json`. Ensuite, le plugin `tauri-plugin-updater` peut être branché.
 - **Paquets Linux** : non signés. Vérifier l'empreinte avec `sha256sum -c SHA256SUMS.txt`.
 - **Attestation de provenance (SLSA)** : produite automatiquement si le dépôt devient public. Pour un dépôt privé, elle exige GitHub Enterprise Cloud.
