@@ -50,7 +50,8 @@
 - [ ] Premières épreuves originales Phonalys, avec un module de collecte normative anonymisée
 
 ## Phase 5 — IA personnelle
-- [ ] Connecteurs Ollama et API compatible OpenAI locale (llama.cpp, LM Studio, vLLM), assistant de configuration
+- [x] Connecteurs Ollama et API compatible OpenAI locale (llama.cpp, LM Studio, vLLM), test de connexion, épinglage TLS
+- [x] Projet de conclusion et de projet thérapeutique à partir des résultats, pseudonymisé, avec les consignes de style du praticien
 - [ ] Bibliothèque de modèles de documents (bilans, rapports, courriers, demandes INAMI), apprentissage du style à partir des exemples du praticien (RAG local, sans réentraînement)
 - [ ] Génération de bilans complets : texte, tableaux, graphiques et diagrammes, export DOCX, ODT et PDF
 - [ ] Assistant conversationnel (« rédige le bilan des patients d'aujourd'hui »), avec des outils internes limités et audités

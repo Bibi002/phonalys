@@ -2105,3 +2105,130 @@ async fn background_lock_setting_and_wake_from_sleep() {
     let (status, _, _) = h.call("GET", "/api/session", None, c).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+/// Faux moteur Ollama : répond `answer` à chaque requête et transmet le corps reçu.
+async fn fake_ollama(
+    answer: &'static str,
+) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 8192];
+            // Lit l'en-tête puis le corps annoncé par Content-Length.
+            loop {
+                let n = s.read(&mut chunk).await.unwrap();
+                buf.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&buf).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let len = text[..end]
+                        .lines()
+                        .find_map(|l| l.strip_prefix("Content-Length: "))
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if buf.len() >= end + 4 + len || n == 0 {
+                        let _ = tx.send(text[end + 4..].to_owned());
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            let body = if String::from_utf8_lossy(&buf).starts_with("GET /api/tags") {
+                r#"{"models":[{"name":"mistral:7b"}]}"#.to_owned()
+            } else {
+                json!({ "message": { "role": "assistant", "content": answer } }).to_string()
+            };
+            let res = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = s.write_all(res.as_bytes()).await;
+            let _ = s.shutdown().await;
+        }
+    });
+    (format!("http://127.0.0.1:{port}"), rx)
+}
+
+#[tokio::test]
+async fn local_ai_drafts_a_pseudonymized_report() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let c = Some(cookie.as_str());
+
+    // Une IA en ligne ou une adresse publique ne peut pas être enregistrée.
+    for endpoint in [
+        "https://api.openai.com/v1",
+        "http://8.8.8.8:11434",
+        "https://192.168.1.5:443",
+    ] {
+        let (s, _, body) = h
+            .call(
+                "PUT",
+                "/api/ai/settings",
+                Some(json!({ "enabled": true, "endpoint": endpoint, "model": "x" })),
+                c,
+            )
+            .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{endpoint} : {body}");
+    }
+
+    let (endpoint, mut seen) = fake_ollama(
+        "### CONCLUSION\n[PRENOM_1] présente des difficultés en répétition de mots (z = -1,80).\n### PROJET\nDeux séances par semaine pour [PRENOM_1].",
+    )
+    .await;
+    let (s, _, body) = h
+        .call("PUT", "/api/ai/settings", Some(json!({ "enabled": true, "endpoint": endpoint, "model": "mistral:7b", "style": "Phrases courtes." })), c)
+        .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (s, _, models) = h.call("POST", "/api/ai/models", None, c).await;
+    assert_eq!(s, StatusCode::OK, "{models}");
+    assert_eq!(models["models"][0], "mistral:7b");
+    seen.recv().await.unwrap();
+
+    let (_, _, p) = h
+        .call("POST", "/api/patients", Some(json!({ "nom": "Dupont", "prenom": "Léa", "naissance": "2018-03-15", "ecole": "École Saint-Joseph" })), c)
+        .await;
+    let pid = p["id"].as_str().unwrap().to_owned();
+    let bilan = json!({
+        "patient_id": pid, "date": "2026-10-25", "type": "initial",
+        "observations": "Léa Dupont coopère bien.",
+        "resultats": [{ "epreuve": "Répétition de mots", "mesure": "z", "valeur": "-1.8" }],
+    });
+    let (s, _, draft) = h
+        .call("POST", "/api/ai/draft", Some(json!({ "patient_id": pid, "bilan": bilan, "instructions": "Insister sur l'école de Léa." })), c)
+        .await;
+    assert_eq!(s, StatusCode::OK, "{draft}");
+    assert_eq!(
+        draft["conclusion"],
+        "Léa présente des difficultés en répétition de mots (z = -1,80)."
+    );
+    assert_eq!(draft["projet"], "Deux séances par semaine pour Léa.");
+
+    let sent = seen.recv().await.unwrap();
+    assert!(sent.contains("\"model\":\"mistral:7b\""), "{sent}");
+    assert!(sent.contains("Phrases courtes."));
+    assert!(sent.contains("8 ans 7 mois"));
+    for secret in [
+        "Dupont",
+        "Léa",
+        "L\\u00e9a",
+        "Saint-Joseph",
+        "2018-03-15",
+        &pid,
+    ] {
+        assert!(!sent.contains(secret), "{secret} envoyé au modèle");
+    }
+
+    let (_, _, audit) = h.call("GET", "/api/audit", None, c).await;
+    assert!(audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["action"] == "ai_request"));
+}

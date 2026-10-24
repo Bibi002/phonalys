@@ -1438,9 +1438,16 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 name = "phonalys-ai"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "proptest",
+ "rcgen",
+ "rustls",
  "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "thiserror",
+ "tokio",
+ "tokio-rustls",
  "url",
 ]
 
@@ -1511,6 +1518,7 @@ dependencies = [
  "axum-server",
  "data-encoding",
  "hex",
+ "phonalys-ai",
  "phonalys-auth",
  "phonalys-core",
  "phonalys-crypto",

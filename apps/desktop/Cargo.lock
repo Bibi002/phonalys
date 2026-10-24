@@ -2992,6 +2992,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "phonalys-ai"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-rustls",
+ "url",
+]
+
+[[package]]
 name = "phonalys-auth"
 version = "0.1.0"
 dependencies = [
@@ -3072,6 +3087,7 @@ dependencies = [
  "axum-server",
  "data-encoding",
  "hex",
+ "phonalys-ai",
  "phonalys-auth",
  "phonalys-core",
  "phonalys-crypto",

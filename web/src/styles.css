@@ -151,6 +151,8 @@ button.row:hover { background: var(--bg); }
 .with-button input { flex: 1; min-width: 0; }
 .invite { border-color: var(--primary); }
 .reauth { border-color: var(--primary); }
+.assistant { margin: 1.25rem 0; padding: 1rem; border: 1px dashed var(--primary); border-radius: 8px; }
+.draft { margin-top: 1rem; }
 .viewer img { display: block; max-width: 100%; margin: 0.75rem auto 0; }
 .viewer iframe { display: block; width: 100%; height: 75vh; margin-top: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
 /* --- Mise en page de l'application --------------------------------------------------- */

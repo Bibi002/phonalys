@@ -26,6 +26,7 @@ function fakeServer() {
       if (url.startsWith("/api/documents"))
         return json([{ id: "d1", patient_id: PATIENT.id, name: "Prescription.pdf", mime: "application/pdf", size: 2048, category: "Prescription", created_at: 1761400000 }]);
       if (url === "/api/reauth") return json({ elevated_secs: 300 });
+      if (url === "/api/ai/settings") return json({ enabled: false, kind: "ollama", endpoint: "http://127.0.0.1:11434", model: "", allow_plaintext_lan: false, style: "", timeout_secs: 300 });
       if (url === "/api/settings") return json({ idle_timeout_minutes: 15, practitioner: {}, auto_backup: true });
       if (url === "/api/backups") return json({ dir: "C:\\data", extra_dir: null, auto: true, last: null, files: [] });
       if (url === "/api/audit") return json({ verified: true, total: 1, entries: [{ seq: 0, at: "2026-10-25T10:00:00Z", action: "login", target: null }] });
@@ -44,7 +45,7 @@ describe("application", () => {
       ["Agenda", /Semaine du/],
       ["Bilans", /Bilans enregistrés/],
       ["Exercices", /Compter les syllabes/],
-      ["Réglages", /Délai d'inactivité/],
+      ["Réglages", /Assistant de rédaction \(IA locale\)/],
       ["Sécurité", /Clés biométriques et de sécurité/],
       ["Journal", /Intégrité du journal vérifiée/],
       ["Documents", /Coffre documentaire/],
@@ -106,6 +107,40 @@ describe("arrière-plan", () => {
     expect(logouts()).toBe(1);
     clock.mockRestore();
     await waitFor(() => expect(screen.queryByRole("navigation")).toBeNull());
+  });
+});
+
+describe("assistant de rédaction", () => {
+  it("envoie le bilan en cours et insère la proposition à la demande", async () => {
+    const calls: [string, RequestInit | undefined][] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push([url, init]);
+        if (url === "/api/ai/settings")
+          return json({ enabled: true, kind: "ollama", endpoint: "http://127.0.0.1:11434", model: "mistral:7b", allow_plaintext_lan: false, style: "", timeout_secs: 300 });
+        if (url === "/api/ai/draft") return json({ conclusion: "Difficultés phonologiques.", projet: "Deux séances par semaine.", model: "mistral:7b" });
+        return json({ error: "introuvable" }, 404);
+      }),
+    );
+    const { DraftAssistant } = await import("./screens/Assistant");
+    const onUse = vi.fn();
+    const bilan = { patient_id: PATIENT.id, date: "2026-10-25", type: "initial" as const, resultats: [{ epreuve: "Répétition", mesure: "z" as const, valeur: "-1.8" }, { epreuve: " ", mesure: "z" as const }] };
+    render(<DraftAssistant bilan={bilan} onUse={onUse} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Proposer une conclusion et un projet" }));
+    await screen.findByText("Difficultés phonologiques.");
+    const body = JSON.parse(String(calls.find(([u]) => u === "/api/ai/draft")?.[1]?.body)) as { bilan: { resultats: unknown[] } };
+    expect(body.bilan.resultats).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Utiliser (remplace le texte actuel)" }));
+    expect(onUse).toHaveBeenCalledWith("Difficultés phonologiques.", "Deux séances par semaine.", "replace");
+  });
+
+  it("reste invisible tant que l'assistant n'est pas configuré", async () => {
+    fakeServer();
+    const { DraftAssistant } = await import("./screens/Assistant");
+    const { container } = render(<DraftAssistant bilan={{ patient_id: "p", date: "2026-10-25", type: "initial", resultats: [] }} onUse={() => undefined} />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(container.textContent).toBe("");
   });
 });
 

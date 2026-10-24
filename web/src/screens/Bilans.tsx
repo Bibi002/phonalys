@@ -4,6 +4,7 @@ import type { Navigate } from "../App";
 import { ConfirmButton, Empty, ErrorBox, Field, Select, TextArea, useAction, useLoad } from "../components";
 import { BATTERIES, batteryName, OTHER_BATTERY } from "../data/batteries";
 import { usePatients, useRecords } from "../hooks";
+import { DraftAssistant } from "./Assistant";
 import {
   age,
   BILAN_TYPE,
@@ -250,6 +251,16 @@ export function BilanEditor(props: {
         Ajouter une épreuve
       </button>
 
+      <DraftAssistant
+        bilan={b}
+        onUse={(conclusion, projet, mode) =>
+          setB({
+            ...b,
+            conclusion: mode === "append" && b.conclusion ? `${b.conclusion}\n\n${conclusion}` : conclusion,
+            projet: mode === "append" && b.projet ? `${b.projet}\n\n${projet}` : projet || (b.projet ?? ""),
+          })
+        }
+      />
       <TextArea label="Conclusion" value={b.conclusion ?? ""} onChange={set("conclusion")} rows={5} hint="Votre analyse clinique : Phonalys ne pose aucun diagnostic." />
       <TextArea label="Projet thérapeutique" value={b.projet ?? ""} onChange={set("projet")} rows={4} />
       <ErrorBox error={error} />

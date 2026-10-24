@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, type Settings as SettingsData } from "../api";
 import { ErrorBox, Field, Select, useAction, useLoad } from "../components";
+import { AssistantSettings } from "./Assistant";
 
 const IDLE = [
   ["5", "5 minutes"],
@@ -51,6 +52,7 @@ export function Settings({ onIdleChanged, onHiddenLockChanged }: { onIdleChanged
   if (!s) return <section className="card"><ErrorBox error={loaded.error} /><p className="muted">Chargement…</p></section>;
   const pr = s.practitioner;
   return (
+    <>
     <form onSubmit={save}>
       <section className="card">
         <h1>Réglages</h1>
@@ -94,5 +96,7 @@ export function Settings({ onIdleChanged, onHiddenLockChanged }: { onIdleChanged
         <button type="submit" disabled={busy}>Enregistrer</button>
       </section>
     </form>
+    <AssistantSettings />
+    </>
   );
 }

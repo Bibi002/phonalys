@@ -1,5 +1,6 @@
 //! Serveur auto-hébergé de Phonalys.
 
+mod ai;
 mod api;
 mod backup;
 mod documents;
@@ -209,6 +210,12 @@ pub fn app(state: AppState) -> Router {
             "/api/reauth/passkey/finish",
             post(documents::reauth_passkey_finish),
         )
+        .route(
+            "/api/ai/settings",
+            get(ai::get_settings).put(ai::put_settings),
+        )
+        .route("/api/ai/models", post(ai::models))
+        .route("/api/ai/draft", post(ai::draft))
         .route("/api/security", get(passkey::status))
         .route(
             "/api/security/policy",
