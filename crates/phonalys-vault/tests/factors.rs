@@ -229,3 +229,70 @@ fn format_1_vault_is_migrated() {
         b"ancien dossier"
     );
 }
+
+// --- Connexion en un geste ------------------------------------------------------------
+
+fn quick(path: &Path, id: &str, prf: &[u8], now: i64) -> Result<UnlockedVault, VaultError> {
+    locked(path)
+        .unlock_with_quick_at(id, prf, now)
+        .map_err(|(_, e)| e)
+}
+
+#[test]
+fn quick_unlock_opens_with_the_device_alone_and_survives_a_password_change() {
+    let (_dir, path) = bound_vault();
+    let mut v = unlock_factor(&path, PASSWORD, "telephone", PRF_PHONE, 0).unwrap();
+    let pk = v.password_key(PASSWORD).unwrap();
+    v.add_quick_factor(&pk, "telephone", PRF_PHONE).unwrap();
+    v.change_password(&pk, b"nouvelle phrase tout aussi longue", params())
+        .unwrap();
+    drop(v);
+
+    let v = quick(&path, "telephone", PRF_PHONE, 10).unwrap();
+    assert_eq!(&v.get("patient", "p1").unwrap()[..], b"dossier");
+    drop(v);
+    // Une clé sans enveloppe « en un geste » ou une mauvaise sortie PRF : refus.
+    assert!(matches!(
+        quick(&path, "yubikey", PRF_KEY, 20),
+        Err(VaultError::FactorRejected)
+    ));
+    assert!(matches!(
+        quick(&path, "telephone", PRF_KEY, 20),
+        Err(VaultError::FactorRejected)
+    ));
+}
+
+#[test]
+fn quick_unlock_requires_the_passphrase_to_be_enabled() {
+    let (_dir, path) = bound_vault();
+    let v = unlock_factor(&path, PASSWORD, "telephone", PRF_PHONE, 0).unwrap();
+    assert!(v.password_key(b"mauvaise phrase de passe").is_err());
+    assert!(v.factor_ids(FactorKind::Quick).unwrap().is_empty());
+}
+
+#[test]
+fn three_failures_require_two_factors_again() {
+    let (_dir, path) = bound_vault();
+    let v = unlock_factor(&path, PASSWORD, "telephone", PRF_PHONE, 0).unwrap();
+    v.add_quick_factor(&v.password_key(PASSWORD).unwrap(), "telephone", PRF_PHONE)
+        .unwrap();
+    drop(v);
+
+    for _ in 0..3 {
+        assert!(matches!(
+            quick(&path, "telephone", b"fausse sortie", 10),
+            Err(VaultError::FactorRejected)
+        ));
+    }
+    assert!(!locked(&path).quick_unlock_allowed().unwrap());
+    // Même la bonne clé seule ne suffit plus…
+    assert!(matches!(
+        quick(&path, "telephone", PRF_PHONE, 10),
+        Err(VaultError::StepUpRequired)
+    ));
+    // …il faut la phrase de passe et un second facteur, qui rétablissent le raccourci.
+    let v = unlock_factor(&path, PASSWORD, "telephone", PRF_PHONE, 10).unwrap();
+    v.reset_lockout().unwrap();
+    drop(v);
+    assert!(quick(&path, "telephone", PRF_PHONE, 20).is_ok());
+}

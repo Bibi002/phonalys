@@ -13,10 +13,16 @@
 //! sont pas nécessaires. En mode « lié au matériel », l'enveloppe par phrase de passe
 //! seule (`meta.wrapped_master`) est effacée : voler le fichier et la phrase de passe
 //! ne suffit plus.
+//!
+//! **Connexion en un geste** (option, par clé) : une enveloppe à une seule couche,
+//! `sceau(HKDF(sortie PRF), clé maîtresse)`. Une clé biométrique avec vérification de
+//! l'utilisateur réunit déjà deux facteurs (l'appareil possédé et l'empreinte ou le
+//! code de l'appareil). Après [`QUICK_MAX_FAILURES`] échecs consécutifs, ce raccourci
+//! est refusé : il faut la phrase de passe **et** un second facteur.
 
 use crate::{
-    check_lockout, derive_stored_kek, register_failure, wrapped_master, LockedVault, UnlockedVault,
-    VaultError, MASTER_CONTEXT,
+    check_lockout, derive_stored_kek, failures, register_failure, wrapped_master, LockedVault,
+    UnlockedVault, VaultError, MASTER_CONTEXT,
 };
 use phonalys_core::audit::AuditAction;
 use phonalys_crypto::{
@@ -41,10 +47,15 @@ pub struct PasswordKey {
     pub(crate) kek: SecretKey,
 }
 
+/// Échecs consécutifs au-delà desquels la connexion en un geste est refusée.
+pub const QUICK_MAX_FAILURES: u32 = 3;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FactorKind {
     Passkey,
     Recovery,
+    /// Connexion en un geste : la sortie PRF seule ouvre l'enveloppe.
+    Quick,
 }
 
 impl FactorKind {
@@ -52,6 +63,7 @@ impl FactorKind {
         match self {
             FactorKind::Passkey => "passkey",
             FactorKind::Recovery => "recovery",
+            FactorKind::Quick => "quick",
         }
     }
 }
@@ -101,6 +113,8 @@ fn wraps(conn: &Connection, kind: FactorKind) -> Result<Vec<(String, Vec<u8>)>, 
     Ok(rows)
 }
 
+/// Enveloppes à double couche (la couche extérieure dépend de la phrase de passe).
+/// Les enveloppes « en un geste » n'en font pas partie.
 fn all_wraps(conn: &Connection) -> Result<Vec<(FactorKind, String, Vec<u8>)>, VaultError> {
     let mut out = Vec::new();
     for kind in [FactorKind::Passkey, FactorKind::Recovery] {
@@ -182,6 +196,45 @@ impl LockedVault {
             match blob.map(|b| open_factor(pk, &b, kind, id, secret)) {
                 Some(Ok(master)) => Ok(master),
                 // Phrase de passe fausse, facteur faux ou inconnu : réponse identique.
+                _ => {
+                    register_failure(&self.conn, now)?;
+                    Err(VaultError::FactorRejected)
+                }
+            }
+        };
+        match attempt() {
+            Ok(master) => self.finish_unlock(master),
+            Err(e) => Err((self, e)),
+        }
+    }
+
+    /// La connexion en un geste est-elle encore permise (moins de
+    /// [`QUICK_MAX_FAILURES`] échecs consécutifs) ?
+    pub fn quick_unlock_allowed(&self) -> Result<bool, VaultError> {
+        Ok(failures(&self.conn)? < QUICK_MAX_FAILURES)
+    }
+
+    /// Connexion en un geste : la sortie PRF d'une clé biométrique seule. Refusée après
+    /// [`QUICK_MAX_FAILURES`] échecs consécutifs ([`VaultError::StepUpRequired`]).
+    #[allow(clippy::result_large_err)]
+    pub fn unlock_with_quick_at(
+        self,
+        id: &str,
+        secret: &[u8],
+        now: i64,
+    ) -> Result<UnlockedVault, (Self, VaultError)> {
+        let attempt = || -> Result<SecretKey, VaultError> {
+            check_lockout(&self.conn, now)?;
+            if !self.quick_unlock_allowed()? {
+                return Err(VaultError::StepUpRequired);
+            }
+            let ctx = context(FactorKind::Quick, id);
+            let opened = wraps(&self.conn, FactorKind::Quick)?
+                .into_iter()
+                .find(|(wid, _)| wid == id)
+                .map(|(_, blob)| unwrap_key(&derive_subkey(secret, &ctx), &blob, &ctx));
+            match opened {
+                Some(Ok(master)) => Ok(master),
                 _ => {
                     register_failure(&self.conn, now)?;
                     Err(VaultError::FactorRejected)
@@ -300,6 +353,26 @@ impl UnlockedVault {
             "INSERT INTO factor_wraps (kind, id, blob) VALUES (?1, ?2, ?3)
              ON CONFLICT (kind, id) DO UPDATE SET blob = excluded.blob",
             params![kind.as_str(), id, blob],
+        )?;
+        Ok(())
+    }
+
+    /// Active la connexion en un geste pour une clé. La phrase de passe est exigée :
+    /// sans elle, quelqu'un devant une session restée ouverte pourrait s'ouvrir un accès
+    /// permanent avec sa propre clé.
+    pub fn add_quick_factor(
+        &self,
+        pk: &PasswordKey,
+        id: &str,
+        secret: &[u8],
+    ) -> Result<(), VaultError> {
+        self.require_password_key(pk)?;
+        let ctx = context(FactorKind::Quick, id);
+        let blob = wrap_key(&derive_subkey(secret, &ctx), &self.master, &ctx)?;
+        self.conn.execute(
+            "INSERT INTO factor_wraps (kind, id, blob) VALUES ('quick', ?1, ?2)
+             ON CONFLICT (kind, id) DO UPDATE SET blob = excluded.blob",
+            params![id, blob],
         )?;
         Ok(())
     }

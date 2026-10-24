@@ -28,6 +28,8 @@ pub enum AuditAction {
     FactorBound,
     /// Le mode lié au matériel a été activé ou désactivé.
     HardwareBindingChanged,
+    /// La connexion en un geste a été activée ou retirée pour une clé.
+    QuickUnlockChanged,
     SecurityPolicyChanged,
     PasswordChanged,
     Unlock,
@@ -44,6 +46,12 @@ pub enum AuditAction {
     DocumentOpened,
     Export,
     SettingsChanged,
+    /// Séance, bilan, objectif ou résultat d'exercice (cible : `type/identifiant`).
+    RecordCreated,
+    RecordViewed,
+    RecordUpdated,
+    RecordErased,
+    AuditViewed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

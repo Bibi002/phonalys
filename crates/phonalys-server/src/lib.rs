@@ -3,6 +3,7 @@
 mod api;
 mod error;
 mod passkey;
+mod records;
 mod state;
 pub mod tls;
 
@@ -163,6 +164,25 @@ pub fn app(state: AppState) -> Router {
         .route("/api/passkeys/bind/start", post(passkey::bind_start))
         .route("/api/passkeys/bind/finish", post(passkey::bind_finish))
         .route("/api/passkeys/{id}", axum::routing::delete(passkey::remove))
+        .route(
+            "/api/passkeys/{id}/quick",
+            axum::routing::delete(passkey::remove_quick),
+        )
+        .route(
+            "/api/records/{kind}",
+            get(records::list).post(records::create),
+        )
+        .route(
+            "/api/records/{kind}/{id}",
+            get(records::get)
+                .put(records::update)
+                .delete(records::delete),
+        )
+        .route(
+            "/api/settings",
+            get(records::get_settings).put(records::put_settings),
+        )
+        .route("/api/audit", get(records::audit))
         .route("/api/security", get(passkey::status))
         .route(
             "/api/security/policy",
@@ -183,6 +203,8 @@ pub fn app(state: AppState) -> Router {
         .route("/api/login", post(api::login))
         .route("/api/login/passkey/start", post(passkey::login_start))
         .route("/api/login/passkey/finish", post(passkey::login_finish))
+        .route("/api/login/quick/start", post(passkey::quick_start))
+        .route("/api/login/quick/finish", post(passkey::quick_finish))
         // Une route d'API inconnue ne doit jamais renvoyer la page de l'application.
         .route("/api/{*rest}", any(|| async { ApiError::NotFound }))
         .merge(protected)

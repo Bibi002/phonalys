@@ -53,6 +53,10 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
 
 export interface Status {
   initialized: boolean;
+  /** Au moins une clé permet la connexion en un geste. */
+  quick_unlock?: boolean;
+  /** Après plusieurs échecs, deux vérifications sont exigées. */
+  step_up?: boolean;
 }
 
 export interface SetupResult {
@@ -66,13 +70,7 @@ export interface SessionInfo {
   idle_timeout_secs: number;
 }
 
-export interface Patient {
-  id: string;
-  nom?: string;
-  prenom?: string;
-  naissance?: string;
-  notes?: string;
-}
+export type { Patient } from "./model";
 
 export interface PasskeyInfo {
   id: string;
@@ -80,6 +78,7 @@ export interface PasskeyInfo {
   backup_eligible: boolean;
   aaguid: string;
   bound: boolean;
+  quick?: boolean;
 }
 
 export interface SecurityStatus {
@@ -87,6 +86,7 @@ export interface SecurityStatus {
   hardware_bound: boolean;
   passkeys: number;
   bound_passkeys: number;
+  quick_passkeys?: number;
   recovery_codes_remaining: number;
 }
 
@@ -94,3 +94,44 @@ export interface BindingResult {
   hardware_bound: boolean;
   recovery_codes?: string[];
 }
+
+export interface Settings {
+  idle_timeout_minutes: number;
+  practitioner: Record<string, string>;
+}
+
+export interface AuditEntry {
+  seq: number;
+  at: string;
+  action: string;
+  target: string | null;
+}
+
+export interface AuditPage {
+  verified: boolean;
+  total: number;
+  entries: AuditEntry[];
+}
+
+// --- Dossier clinique -------------------------------------------------------------------
+
+/** Types d'enregistrements acceptés par le serveur (liste blanche). */
+export type RecordKind = "seance" | "bilan" | "objectif" | "exercice";
+
+export const records = {
+  list<T>(kind: RecordKind, patientId?: string): Promise<(T & { id: string })[]> {
+    const q = patientId ? `?patient_id=${encodeURIComponent(patientId)}` : "";
+    return api("GET", `/api/records/${kind}${q}`);
+  },
+  async save<T extends { id?: string }>(kind: RecordKind, value: T): Promise<string> {
+    const { id, ...data } = value;
+    if (id) {
+      await api("PUT", `/api/records/${kind}/${id}`, data);
+      return id;
+    }
+    return (await api<{ id: string }>("POST", `/api/records/${kind}`, data)).id;
+  },
+  remove(kind: RecordKind, id: string): Promise<void> {
+    return api("DELETE", `/api/records/${kind}/${id}`);
+  },
+};

@@ -1,22 +1,43 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, setApiHooks, type SecurityStatus, type SessionInfo, type Status } from "./api";
 import { ErrorBox } from "./components";
+import { Agenda } from "./screens/Agenda";
+import { Audit } from "./screens/Audit";
+import { Bilans } from "./screens/Bilans";
+import { Exercises } from "./screens/Exercises";
+import { Home } from "./screens/Home";
 import { Login } from "./screens/Login";
 import { Patients } from "./screens/Patients";
 import { Security } from "./screens/Security";
+import { Settings } from "./screens/Settings";
 import { Setup } from "./screens/Setup";
 import { webauthnAvailable } from "./webauthn";
 
 type Phase = "loading" | "setup" | "login" | "open" | "offline";
-type Page = "patients" | "security";
+export type Page = "home" | "patients" | "agenda" | "bilans" | "exercices" | "settings" | "security" | "audit";
+export type Navigate = (page: Page, patientId?: string) => void;
 
-/** Délai avant le verrouillage automatique à partir duquel on prévient. */
-const WARNING_SECS = 60;
+const PAGES: readonly (readonly [Page, string])[] = [
+  ["home", "Accueil"],
+  ["patients", "Patients"],
+  ["agenda", "Agenda"],
+  ["bilans", "Bilans"],
+  ["exercices", "Exercices"],
+  ["settings", "Réglages"],
+  ["security", "Sécurité"],
+  ["audit", "Journal"],
+];
+
+/** Le compte à rebours n'apparaît que dans les dernières minutes avant le verrouillage. */
+const WARNING_SECS = 120;
+/** Au plus un signal d'activité vers le serveur par minute. */
+const KEEPALIVE_SECS = 60;
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
-  const [page, setPage] = useState<Page>("patients");
-  const [idle, setIdle] = useState(300);
+  const [page, setPage] = useState<Page>("home");
+  const [patientId, setPatientId] = useState<string>();
+  const [idle, setIdle] = useState(900);
   const lastActivity = useRef(Date.now());
 
   const refresh = useCallback(async () => {
@@ -45,6 +66,28 @@ export function App() {
     void refresh();
   }, [refresh]);
 
+  // Taper, cliquer ou faire défiler compte comme une activité : la session est
+  // prolongée sur le serveur (au plus une fois par minute), sans quoi le verrouillage
+  // surviendrait en pleine saisie d'un compte rendu.
+  useEffect(() => {
+    if (phase !== "open") return;
+    const onInput = () => {
+      if (Date.now() - lastActivity.current > KEEPALIVE_SECS * 1000) {
+        lastActivity.current = Date.now();
+        void api("GET", "/api/session").catch(() => undefined);
+      }
+    };
+    const events = ["pointerdown", "keydown", "wheel", "touchstart"] as const;
+    events.forEach((e) => window.addEventListener(e, onInput, { passive: true }));
+    return () => events.forEach((e) => window.removeEventListener(e, onInput));
+  }, [phase]);
+
+  const navigate: Navigate = useCallback((p, id) => {
+    setPage(p);
+    setPatientId(id);
+    window.scrollTo?.(0, 0);
+  }, []);
+
   if (phase === "loading") return <main className="narrow"><p className="muted">Connexion au serveur…</p></main>;
   if (phase === "offline")
     return (
@@ -60,44 +103,60 @@ export function App() {
   if (phase === "login") return <Login onLoggedIn={() => void refresh()} />;
 
   return (
-    <>
+    <div className="shell">
       <header className="topbar">
         <strong className="brand">Phonalys</strong>
-        <nav>
-          <button type="button" className={page === "patients" ? "tab active" : "tab"} onClick={() => setPage("patients")}>
-            Patients
-          </button>
-          <button type="button" className={page === "security" ? "tab active" : "tab"} onClick={() => setPage("security")}>
-            Sécurité
-          </button>
-        </nav>
         <SessionTimer idleSecs={idle} lastActivity={lastActivity} onExpired={() => setPhase("login")} />
         <LockButton onLocked={() => setPhase("login")} />
       </header>
-      <main>
-        {page === "patients" && <BiometricInvite onActivate={() => setPage("security")} />}
-        {page === "patients" ? <Patients /> : <Security />}
+      <nav className="sidebar" aria-label="Navigation principale">
+        {PAGES.map(([p, label]) => (
+          <button
+            key={p}
+            type="button"
+            className={page === p ? "nav active" : "nav"}
+            aria-current={page === p ? "page" : undefined}
+            onClick={() => navigate(p)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      <main className="content">
+        {page === "home" && (
+          <>
+            <BiometricInvite onActivate={() => navigate("security")} />
+            <Home navigate={navigate} />
+          </>
+        )}
+        {page === "patients" && <Patients navigate={navigate} openId={patientId} />}
+        {page === "agenda" && <Agenda navigate={navigate} />}
+        {page === "bilans" && <Bilans navigate={navigate} />}
+        {page === "exercices" && <Exercises patientId={patientId} />}
+        {page === "settings" && <Settings onIdleChanged={setIdle} />}
+        {page === "security" && <Security />}
+        {page === "audit" && <Audit />}
       </main>
-    </>
+    </div>
   );
 }
 
-/** Après l'installation : propose d'activer la connexion quotidienne par biométrie. */
+/** Après l'installation : propose la connexion en un geste par biométrie. */
 export function BiometricInvite({ onActivate }: { onActivate: () => void }) {
   const [show, setShow] = useState(false);
   useEffect(() => {
     if (!webauthnAvailable()) return;
     api<SecurityStatus>("GET", "/api/security")
-      .then((s) => setShow(s.passkeys === 0))
+      .then((s) => setShow(s.passkeys === 0 || (s.quick_passkeys ?? 0) === 0))
       .catch(() => undefined);
   }, []);
   if (!show) return null;
   return (
     <section className="card invite">
-      <h2>Activez la connexion biométrique</h2>
+      <h2>Connectez-vous en un geste</h2>
       <p>
-        Chaque jour, vous n'aurez plus qu'à taper votre phrase de passe puis à poser le doigt (ou utiliser le visage
-        ou Windows Hello). Plus besoin du code à 6 chiffres. La clé sert à chaque connexion, sans limite.
+        Activez la connexion biométrique : chaque jour, il suffira de poser le doigt, de montrer votre visage ou
+        d'utiliser Windows Hello. La phrase de passe ne sera redemandée qu'après trois échecs.
       </p>
       <div className="actions">
         <button type="button" onClick={onActivate}>
@@ -118,7 +177,7 @@ function LockButton({ onLocked }: { onLocked: () => void }) {
       <button
         type="button"
         className="lock"
-        title="Verrouille le coffre sur tous les appareils"
+        title="Verrouille immédiatement, sur tous les appareils"
         onClick={() =>
           api("POST", "/api/lock")
             .then(onLocked)
@@ -132,7 +191,10 @@ function LockButton({ onLocked }: { onLocked: () => void }) {
   );
 }
 
-/** Compte à rebours du verrouillage automatique (calé sur la dernière requête). */
+/**
+ * Verrouillage automatique : invisible tant qu'il reste du temps, puis un compte à
+ * rebours avec « Rester connecté » dans les deux dernières minutes.
+ */
 export function SessionTimer(props: {
   idleSecs: number;
   lastActivity: { current: number };
@@ -153,16 +215,21 @@ export function SessionTimer(props: {
     return () => clearInterval(t);
   });
 
+  if (left > WARNING_SECS) {
+    return (
+      <span className="timer" title="Sans activité, Phonalys se verrouille pour protéger les dossiers. Délai réglable dans « Réglages ».">
+        Verrouillage auto : {Math.round(props.idleSecs / 60)} min
+      </span>
+    );
+  }
   const mm = Math.floor(left / 60);
   const ss = String(left % 60).padStart(2, "0");
   return (
-    <span className={left <= WARNING_SECS ? "timer warn" : "timer"} aria-live={left <= WARNING_SECS ? "polite" : "off"}>
-      Verrouillage dans {mm}:{ss}
-      {left <= WARNING_SECS && (
-        <button type="button" className="ghost" onClick={() => void api("GET", "/api/session").catch(() => undefined)}>
-          Rester connecté
-        </button>
-      )}
+    <span className="timer warn" role="status">
+      Inactif : verrouillage dans {mm}:{ss}
+      <button type="button" className="ghost" onClick={() => void api("GET", "/api/session").catch(() => undefined)}>
+        Rester connecté
+      </button>
     </span>
   );
 }

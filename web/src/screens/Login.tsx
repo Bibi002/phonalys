@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { api, ApiError } from "../api";
+import { useEffect, useState, type FormEvent } from "react";
+import { api, ApiError, type Status } from "../api";
 import { describeError, ErrorBox, Field, PasswordField } from "../components";
 import { describeWebAuthnError, getAssertion, prfSalt, webauthnAvailable } from "../webauthn";
 
@@ -30,7 +30,89 @@ function rememberMethod(m: Method) {
 const NO_PASSKEY =
   "Aucune clé biométrique n'est encore enregistrée. Connectez-vous avec le code à 6 chiffres de votre application d'authentification ; vous pourrez ensuite activer l'empreinte, le visage ou Windows Hello dans « Sécurité ».";
 
+const STEP_UP =
+  "Après 3 échecs, deux vérifications sont demandées pour protéger les dossiers : votre phrase de passe, puis votre clé biométrique ou le code à 6 chiffres.";
+
+const describe = (e: unknown) => (e instanceof DOMException ? describeWebAuthnError(e) : describeError(e));
+const isStepUp = (e: unknown) => e instanceof ApiError && /deux vérifications/.test(e.message);
+
 export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
+  const [status, setStatus] = useState<Status>();
+  // `quick` : un seul geste ; `full` : phrase de passe + second facteur.
+  const [mode, setMode] = useState<"quick" | "full">("full");
+
+  useEffect(() => {
+    api<Status | undefined>("GET", "/api/status")
+      .then((s) => {
+        if (!s) return;
+        setStatus(s);
+        if (s.quick_unlock && !s.step_up && webauthnAvailable()) setMode("quick");
+      })
+      .catch(() => undefined);
+  }, []);
+
+  return (
+    <main className="narrow">
+      {mode === "quick" ? (
+        <QuickLogin
+          onLoggedIn={onLoggedIn}
+          onStepUp={() => {
+            setStatus({ ...(status ?? { initialized: true }), step_up: true });
+            setMode("full");
+          }}
+          onOther={() => setMode("full")}
+        />
+      ) : (
+        <FullLogin
+          onLoggedIn={onLoggedIn}
+          stepUp={status?.step_up ?? false}
+          onQuick={status?.quick_unlock && !status.step_up && webauthnAvailable() ? () => setMode("quick") : undefined}
+        />
+      )}
+    </main>
+  );
+}
+
+/** Connexion en un geste : la clé biométrique seule. */
+function QuickLogin(props: { onLoggedIn: () => void; onStepUp: () => void; onOther: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+
+  async function go() {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const options = await api<Record<string, unknown>>("POST", "/api/login/quick/start");
+      const { response, prfOutput } = await getAssertion(options);
+      if (!prfOutput) throw new Error("Cet appareil ne fournit pas l'extension PRF : utilisez une autre méthode.");
+      await api("POST", "/api/login/quick/finish", { response, prf_output: prfOutput });
+      rememberMethod("passkey");
+      props.onLoggedIn();
+    } catch (e) {
+      if (isStepUp(e)) return props.onStepUp();
+      setError(describe(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card login-quick">
+      <h1>Phonalys</h1>
+      <p className="muted">Vos données sont chiffrées. Identifiez-vous pour les ouvrir.</p>
+      <button type="button" className="big" disabled={busy} onClick={() => void go()} autoFocus>
+        {busy ? "Vérification…" : "Se connecter avec ma clé biométrique"}
+      </button>
+      <p className="muted">Empreinte, visage ou Windows Hello : un seul geste suffit.</p>
+      <ErrorBox error={error} />
+      <button type="button" className="ghost" onClick={props.onOther}>
+        Utiliser une autre méthode
+      </button>
+    </section>
+  );
+}
+
+function FullLogin(props: { onLoggedIn: () => void; stepUp: boolean; onQuick: (() => void) | undefined }) {
   const [method, setMethod] = useState<Method>(savedMethod);
   const [passphrase, setPassphrase] = useState("");
   const [code, setCode] = useState("");
@@ -70,7 +152,7 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
         rememberMethod(method);
         setPassphrase("");
         setCode("");
-        onLoggedIn();
+        props.onLoggedIn();
       })
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 400 && /aucune clé biométrique/.test(err.message)) {
@@ -79,85 +161,89 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
           return;
         }
         setBlocked(err instanceof ApiError && (err.status === 429 || /bloquée/.test(err.message)));
-        setError(err instanceof DOMException ? describeWebAuthnError(err) : describeError(err));
+        setError(describe(err));
       })
       .finally(() => setBusy(false));
   }
 
   return (
-    <main className="narrow">
-      <form className="card" onSubmit={submit}>
-        <h1>Phonalys</h1>
-        <p className="muted">Vos données sont chiffrées. Identifiez-vous pour les ouvrir.</p>
-        <div className="tabs" role="tablist" aria-label="Méthode de connexion">
-          {(
-            [
-              ["passkey", "Clé biométrique"],
-              ["totp", "Code à 6 chiffres"],
-              ["recovery", "Code de récupération"],
-            ] as const
-          ).map(([m, label]) => (
-            <button
-              key={m}
-              type="button"
-              role="tab"
-              aria-selected={method === m}
-              className={method === m ? "tab active" : "tab"}
-              onClick={() => choose(m)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <PasswordField
-          label="Phrase de passe"
-          value={passphrase}
-          onChange={setPassphrase}
-          autoComplete="current-password"
-          required
-          autoFocus
-          hint="Celle choisie à l'installation, exactement (majuscules, accents et espaces comptent)."
-        />
-        {method === "totp" && (
-          <Field
-            label="Code de l'application d'authentification"
-            value={code}
-            onChange={setCode}
-            autoComplete="one-time-code"
-            inputMode="numeric"
-            required
-          />
-        )}
-        {method === "recovery" && (
-          <Field
-            label="Code de récupération"
-            value={code}
-            onChange={setCode}
-            required
-            hint="Format XXXX-XXXX-XXXX-XXXX. Chaque code ne sert qu'une fois et débloque aussi une connexion bloquée."
-          />
-        )}
-        {method === "passkey" && (
-          <p className="muted">
-            Après la phrase de passe, votre appareil demande l'empreinte, le visage ou le code Windows Hello. La clé
-            sert à chaque connexion, sans limite.
-          </p>
-        )}
-        {method === "passkey" && !webauthnAvailable() && (
-          <p className="warning">
-            Les clés biométriques exigent une connexion HTTPS avec un nom de domaine et un certificat reconnu.
-          </p>
-        )}
-        <ErrorBox error={error} />
-        {blocked && method !== "recovery" && (
-          <button type="button" className="ghost" onClick={() => choose("recovery")}>
-            Débloquer avec un code de récupération
+    <form className="card" onSubmit={submit}>
+      <h1>Phonalys</h1>
+      <p className="muted">Vos données sont chiffrées. Identifiez-vous pour les ouvrir.</p>
+      {props.stepUp && <p className="warning">{STEP_UP}</p>}
+      <div className="tabs" role="tablist" aria-label="Second facteur">
+        {(
+          [
+            ["passkey", "Clé biométrique"],
+            ["totp", "Code à 6 chiffres"],
+            ["recovery", "Code de récupération"],
+          ] as const
+        ).map(([m, label]) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={method === m}
+            className={method === m ? "tab active" : "tab"}
+            onClick={() => choose(m)}
+          >
+            {label}
           </button>
-        )}
-        <button type="submit" disabled={busy}>
-          {busy ? "Vérification…" : method === "passkey" ? "Continuer avec ma clé" : "Déverrouiller"}
+        ))}
+      </div>
+      <PasswordField
+        label="Phrase de passe"
+        value={passphrase}
+        onChange={setPassphrase}
+        autoComplete="current-password"
+        required
+        autoFocus
+        hint="Celle choisie à l'installation, exactement (majuscules, accents et espaces comptent)."
+      />
+      {method === "totp" && (
+        <Field
+          label="Code de l'application d'authentification"
+          value={code}
+          onChange={setCode}
+          autoComplete="one-time-code"
+          inputMode="numeric"
+          required
+        />
+      )}
+      {method === "recovery" && (
+        <Field
+          label="Code de récupération"
+          value={code}
+          onChange={setCode}
+          required
+          hint="Format XXXX-XXXX-XXXX-XXXX. Chaque code ne sert qu'une fois et débloque aussi une connexion bloquée."
+        />
+      )}
+      {method === "passkey" && (
+        <p className="muted">
+          Après la phrase de passe, votre appareil demande l'empreinte, le visage ou le code Windows Hello. La clé sert
+          à chaque connexion, sans limite.
+        </p>
+      )}
+      {method === "passkey" && !webauthnAvailable() && (
+        <p className="warning">
+          Les clés biométriques exigent une connexion HTTPS avec un nom de domaine et un certificat reconnu.
+        </p>
+      )}
+      <ErrorBox error={error} />
+      {blocked && method !== "recovery" && (
+        <button type="button" className="ghost" onClick={() => choose("recovery")}>
+          Débloquer avec un code de récupération
         </button>
-      </form>
-    </main>
+      )}
+      <button type="submit" disabled={busy}>
+        {busy ? "Vérification…" : method === "passkey" ? "Continuer avec ma clé" : "Déverrouiller"}
+      </button>
+      {props.onQuick && (
+        <button type="button" className="ghost" onClick={props.onQuick}>
+          Revenir à la connexion en un geste
+        </button>
+      )}
+    </form>
   );
 }

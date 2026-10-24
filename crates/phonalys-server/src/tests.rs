@@ -416,8 +416,10 @@ async fn auto_lock_after_idle_timeout() {
     let _cookie = h.login(&totp).await;
     h.state.auto_lock(state::now());
     assert!(h.state.is_unlocked(), "session encore active");
-    h.state
-        .auto_lock(state::now() + SessionConfig::default().idle_timeout_secs + 1);
+    // Délai par défaut des réglages du cabinet : 15 minutes.
+    h.state.auto_lock(state::now() + 15 * 60 - 10);
+    assert!(h.state.is_unlocked());
+    h.state.auto_lock(state::now() + 15 * 60 + 1);
     assert!(!h.state.is_unlocked());
 }
 
@@ -1275,4 +1277,350 @@ async fn recovery_failure_does_not_reveal_which_part_is_wrong() {
         )
         .await;
     assert_eq!(s, StatusCode::NO_CONTENT);
+}
+
+// --- Connexion en un geste ------------------------------------------------------------------
+
+impl Harness {
+    /// Active la connexion en un geste pour une clé inscrite.
+    async fn enable_quick(
+        &self,
+        cookie: &str,
+        device: &mut SoftAuthenticator,
+        passphrase: &str,
+    ) -> StatusCode {
+        let id = BASE64URL_NOPAD.encode(&device.credential_id);
+        let (s, _, options) = self
+            .call(
+                "POST",
+                "/api/passkeys/bind/start",
+                Some(json!({ "credential_id": id, "purpose": "quick" })),
+                Some(cookie),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{options}");
+        let salt = prf_salt(&options).expect("sel PRF");
+        let response = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+        let (s, _, _) = self
+            .call(
+                "POST",
+                "/api/passkeys/bind/finish",
+                Some(json!({ "passphrase": passphrase, "response": response, "prf_output": device.prf_b64(&salt) })),
+                Some(cookie),
+            )
+            .await;
+        s
+    }
+
+    /// Connexion en un geste ; `prf_from` permet de simuler une autre clé.
+    async fn quick_login(
+        &self,
+        device: &mut SoftAuthenticator,
+        prf_from: Option<&SoftAuthenticator>,
+    ) -> (StatusCode, HeaderMap, Value) {
+        let (s, _, options) = self
+            .call("POST", "/api/login/quick/start", None, None)
+            .await;
+        if s != StatusCode::OK {
+            return (s, HeaderMap::new(), options);
+        }
+        let salt = prf_salt(&options).expect("sel PRF");
+        let response = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+        let prf = prf_from.unwrap_or(device).prf_b64(&salt);
+        self.call(
+            "POST",
+            "/api/login/quick/finish",
+            Some(json!({ "response": response, "prf_output": prf })),
+            None,
+        )
+        .await
+    }
+}
+
+#[tokio::test]
+async fn quick_unlock_end_to_end() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+
+    // Pas encore activée : refus clair, et l'état public le dit.
+    let (_, _, st) = h.call("GET", "/api/status", None, None).await;
+    assert_eq!(st["quick_unlock"], false);
+    let (s, _, _) = h.call("POST", "/api/login/quick/start", None, None).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // Activer exige la phrase de passe.
+    assert_eq!(
+        h.enable_quick(&cookie, &mut device, "mauvaise phrase de passe")
+            .await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        h.enable_quick(&cookie, &mut device, PASSPHRASE).await,
+        StatusCode::OK
+    );
+    let (_, _, list) = h.call("GET", "/api/passkeys", None, Some(&cookie)).await;
+    assert_eq!(list[0]["quick"], true);
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    let (_, _, st) = h.call("GET", "/api/status", None, None).await;
+    assert_eq!(st["quick_unlock"], true);
+    assert_eq!(st["step_up"], false);
+
+    // Un seul geste : pas de phrase de passe.
+    let (s, headers, body) = h.quick_login(&mut device, None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "{body}");
+    let cookie = cookie_from(&headers);
+    let (s, _, _) = h.call("GET", "/api/patients", None, Some(&cookie)).await;
+    assert_eq!(s, StatusCode::OK);
+
+    // Retirer le raccourci : la clé reste, mais le geste seul ne suffit plus.
+    let id = list[0]["id"].as_str().unwrap().to_owned();
+    let (s, _, _) = h
+        .call(
+            "DELETE",
+            &format!("/api/passkeys/{id}/quick"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+    let (s, _, _) = h.call("POST", "/api/login/quick/start", None, None).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = h.passkey_login(&mut device).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn quick_unlock_needs_a_live_signature_and_the_right_device() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+    assert_eq!(
+        h.enable_quick(&cookie, &mut device, PASSPHRASE).await,
+        StatusCode::OK
+    );
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    // Une sortie PRF d'un autre appareil n'ouvre rien.
+    let other = SoftAuthenticator::new(Algorithm::Es256);
+    let (s, _, body) = h.quick_login(&mut device, Some(&other)).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["remaining_attempts"], 3);
+
+    // Une bonne sortie PRF avec une signature sans biométrie est refusée aussi.
+    device.user_verified = false;
+    let (s, _, _) = h.quick_login(&mut device, None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert!(!h.state.is_unlocked());
+}
+
+#[tokio::test]
+async fn three_failures_then_two_verifications_are_required() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+    assert_eq!(
+        h.enable_quick(&cookie, &mut device, PASSPHRASE).await,
+        StatusCode::OK
+    );
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    let other = SoftAuthenticator::new(Algorithm::Es256);
+    for _ in 0..2 {
+        let (s, _, _) = h.quick_login(&mut device, Some(&other)).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED);
+    }
+    let (s, _, body) = h.quick_login(&mut device, Some(&other)).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["step_up"], true, "{body}");
+
+    let (_, _, st) = h.call("GET", "/api/status", None, None).await;
+    assert_eq!(st["step_up"], true);
+    // Même avec le bon appareil, le geste seul est refusé…
+    let (s, _, body) = h.quick_login(&mut device, None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["step_up"], true);
+
+    // …phrase de passe + clé biométrique : accepté, et le raccourci revient.
+    let (s, headers) = h.passkey_login(&mut device).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    h.call("POST", "/api/lock", None, Some(&cookie_from(&headers)))
+        .await;
+    let (_, _, st) = h.call("GET", "/api/status", None, None).await;
+    assert_eq!(st["step_up"], false);
+    let (s, _, _) = h.quick_login(&mut device, None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+}
+
+// --- Dossier clinique, réglages, audit -----------------------------------------------------
+
+#[tokio::test]
+async fn clinical_records_are_typed_linked_and_erased_with_the_patient() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let c = Some(cookie.as_str());
+
+    let (_, _, p) = h
+        .call("POST", "/api/patients", Some(json!({ "nom": "Test" })), c)
+        .await;
+    let pid = p["id"].as_str().unwrap().to_owned();
+    let (_, _, p2) = h
+        .call("POST", "/api/patients", Some(json!({ "nom": "Autre" })), c)
+        .await;
+    let pid2 = p2["id"].as_str().unwrap().to_owned();
+
+    // Type inconnu : refusé.
+    let (s, _, _) = h
+        .call("POST", "/api/records/n_importe_quoi", Some(json!({})), c)
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    // Patient inconnu : refusé.
+    let fake = uuid::Uuid::new_v4().to_string();
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/records/seance",
+            Some(json!({ "patient_id": fake })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    let (s, _, seance) = h
+        .call(
+            "POST",
+            "/api/records/seance",
+            Some(json!({ "patient_id": pid, "date": "2026-10-24", "notes": "lecture" })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let sid = seance["id"].as_str().unwrap().to_owned();
+    h.call(
+        "POST",
+        "/api/records/bilan",
+        Some(json!({ "patient_id": pid, "type": "initial" })),
+        c,
+    )
+    .await;
+    h.call(
+        "POST",
+        "/api/records/seance",
+        Some(json!({ "patient_id": pid2 })),
+        c,
+    )
+    .await;
+
+    let (_, _, mine) = h
+        .call(
+            "GET",
+            &format!("/api/records/seance?patient_id={pid}"),
+            None,
+            c,
+        )
+        .await;
+    assert_eq!(mine.as_array().unwrap().len(), 1);
+    assert_eq!(mine[0]["notes"], "lecture");
+    assert_eq!(mine[0]["id"], sid.as_str());
+
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            &format!("/api/records/seance/{sid}"),
+            Some(json!({ "patient_id": pid, "notes": "lecture + rimes" })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, _, one) = h
+        .call("GET", &format!("/api/records/seance/{sid}"), None, c)
+        .await;
+    assert_eq!(one["notes"], "lecture + rimes");
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            &format!("/api/records/seance/{fake}"),
+            Some(json!({})),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "PUT ne crée pas");
+
+    // Effacer le patient efface son dossier clinique, pas celui des autres.
+    let (s, _, _) = h
+        .call("DELETE", &format!("/api/patients/{pid}"), None, c)
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, _, all) = h.call("GET", "/api/records/seance", None, c).await;
+    assert_eq!(all.as_array().unwrap().len(), 1);
+    assert_eq!(all[0]["patient_id"], pid2.as_str());
+    let (_, _, bilans) = h.call("GET", "/api/records/bilan", None, c).await;
+    assert_eq!(bilans.as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn idle_timeout_setting_is_validated_and_applied() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let c = Some(cookie.as_str());
+
+    let (_, _, s0) = h.call("GET", "/api/settings", None, c).await;
+    assert_eq!(s0["idle_timeout_minutes"], 15);
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            "/api/settings",
+            Some(json!({ "idle_timeout_minutes": 600 })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            "/api/settings",
+            Some(json!({ "idle_timeout_minutes": 30, "practitioner": { "nom": "Cabinet" } })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, _, info) = h.call("GET", "/api/session", None, c).await;
+    assert_eq!(info["idle_timeout_secs"], 1800);
+
+    h.state.auto_lock(state::now() + 20 * 60);
+    assert!(h.state.is_unlocked(), "30 min choisies");
+    h.state.auto_lock(state::now() + 31 * 60);
+    assert!(!h.state.is_unlocked());
+}
+
+#[tokio::test]
+async fn audit_log_is_readable_and_pseudonymous() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let c = Some(cookie.as_str());
+    h.call(
+        "POST",
+        "/api/patients",
+        Some(json!({ "nom": "Dupont", "prenom": "Léa" })),
+        c,
+    )
+    .await;
+    let (s, _, page) = h.call("GET", "/api/audit", None, c).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(page["verified"], true);
+    assert_eq!(page["entries"][0]["action"], "audit_viewed");
+    assert!(
+        !page.to_string().contains("Dupont"),
+        "aucun nom dans l'audit"
+    );
+    let (s, _, _) = h.call("GET", "/api/audit", None, None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
 }

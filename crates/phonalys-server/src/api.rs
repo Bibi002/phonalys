@@ -17,7 +17,7 @@ use zeroize::Zeroizing;
 
 /// Le préfixe `__Host-` impose au navigateur : Secure, Path=/ et aucun Domain.
 pub const SESSION_COOKIE: &str = "__Host-phonalys_session";
-const PATIENT: &str = "patient";
+pub(crate) const PATIENT: &str = "patient";
 const TOTP_SECRET: &str = "totp";
 const TOTP_LAST_STEP: &str = "totp-last-step";
 
@@ -56,11 +56,28 @@ pub async fn require_session(State(state): State<AppState>, req: Request, next: 
 #[derive(Debug, Serialize)]
 pub struct Status {
     initialized: bool,
+    /// Au moins une clé permet la connexion en un geste.
+    quick_unlock: bool,
+    /// Après plusieurs échecs, deux vérifications sont exigées.
+    step_up: bool,
 }
 
 pub async fn status(State(state): State<AppState>) -> Json<Status> {
+    let initialized = state.lock_inner().setup_token.is_none();
+    let (quick_unlock, step_up) = initialized
+        .then(|| LockedVault::open(&state.config.vault_path).ok())
+        .flatten()
+        .map(|v| {
+            let quick = v
+                .factor_ids(phonalys_vault::FactorKind::Quick)
+                .is_ok_and(|ids| !ids.is_empty());
+            (quick, !v.quick_unlock_allowed().unwrap_or(false))
+        })
+        .unwrap_or_default();
     Json(Status {
-        initialized: state.lock_inner().setup_token.is_none(),
+        initialized,
+        quick_unlock,
+        step_up,
     })
 }
 
@@ -265,6 +282,8 @@ pub(crate) fn conclude_login(
         Ok(Some(action)) => {
             vault.reset_lockout()?;
             vault.audit(ACTOR, action, None)?;
+            let idle = crate::records::settings(&vault)?.idle_timeout_minutes;
+            inner.sessions.set_idle_timeout(idle * 60);
             let token = inner.sessions.create(now);
             inner.phase = Phase::Unlocked(vault);
             let cookie =
@@ -364,7 +383,7 @@ pub async fn lock(State(state): State<AppState>) -> Result<Response, ApiError> {
     Ok(expire_cookie(StatusCode::NO_CONTENT.into_response()))
 }
 
-fn parse_id(id: &str) -> Result<String, ApiError> {
+pub(crate) fn parse_id(id: &str) -> Result<String, ApiError> {
     uuid::Uuid::parse_str(id)
         .map(|u| u.to_string())
         .map_err(|_| ApiError::NotFound)
@@ -443,6 +462,9 @@ pub async fn delete_patient(
 ) -> Result<StatusCode, ApiError> {
     let id = parse_id(&id)?;
     state.with_vault(|vault| {
+        // Le dossier doit exister avant d'effacer quoi que ce soit.
+        let _: Value = vault.get_json(PATIENT, &id)?;
+        crate::records::erase_patient_records(vault, &id)?;
         vault.delete(PATIENT, &id)?;
         vault.audit(ACTOR, AuditAction::PatientErased, Some(&id))?;
         Ok(StatusCode::NO_CONTENT)

@@ -7,12 +7,17 @@
 //!
 //! En mode **lié au matériel**, l'appareil renvoie aussi une sortie PRF : c'est elle,
 //! combinée à la phrase de passe, qui ouvre cryptographiquement le coffre.
+//!
+//! **Connexion en un geste** (`/api/login/quick/*`) : une seule vérification, la clé
+//! biométrique, dont la sortie PRF ouvre seule le coffre. Elle réunit l'appareil
+//! possédé et l'empreinte (ou le code de l'appareil). Après trois échecs consécutifs,
+//! deux vérifications sont de nouveau exigées.
 
 use crate::api::{blocking, conclude_login, recovery_secrets, take_vault, unlock_with_passphrase};
 use crate::error::ApiError;
 use crate::state::{
-    new_challenge, now, AppState, PendingBind, PendingLogin, PendingRegistration, Phase, ACTOR,
-    CHALLENGE_TTL_SECS,
+    new_challenge, now, AppState, BindPurpose, PendingBind, PendingLogin, PendingQuick,
+    PendingRegistration, Phase, ACTOR, CHALLENGE_TTL_SECS,
 };
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -85,10 +90,13 @@ pub struct PasskeyInfo {
     aaguid: String,
     /// La clé est liée cryptographiquement au coffre (extension PRF).
     bound: bool,
+    /// La clé permet la connexion en un geste.
+    quick: bool,
 }
 
 fn infos(vault: &UnlockedVault) -> Result<Vec<PasskeyInfo>, ApiError> {
     let bound = vault.factor_ids(FactorKind::Passkey)?;
+    let quick = vault.factor_ids(FactorKind::Quick)?;
     Ok(credentials(vault)?
         .iter()
         .map(|c| PasskeyInfo {
@@ -97,6 +105,7 @@ fn infos(vault: &UnlockedVault) -> Result<Vec<PasskeyInfo>, ApiError> {
             backup_eligible: c.backup_eligible,
             aaguid: c.aaguid.clone(),
             bound: bound.contains(&c.id),
+            quick: quick.contains(&c.id),
         })
         .collect())
 }
@@ -196,6 +205,7 @@ pub async fn remove(
         }
         // Refuse aussi de retirer la dernière clé liée d'un coffre lié au matériel.
         vault.remove_factor(FactorKind::Passkey, &id)?;
+        vault.remove_factor(FactorKind::Quick, &id)?;
         save_credentials(vault, &creds)?;
         vault.audit(ACTOR, AuditAction::PasskeyRemoved, None)?;
         Ok(StatusCode::NO_CONTENT)
@@ -204,9 +214,28 @@ pub async fn remove(
 
 // --- Lien cryptographique d'une clé (extension PRF) ---------------------------------
 
+/// Retire la connexion en un geste d'une clé (la clé reste utilisable avec la phrase
+/// de passe).
+pub async fn remove_quick(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<PasskeyInfo>>, ApiError> {
+    state.with_vault(|vault| {
+        if !vault.factor_ids(FactorKind::Quick)?.contains(&id) {
+            return Err(ApiError::NotFound);
+        }
+        vault.remove_factor(FactorKind::Quick, &id)?;
+        vault.audit(ACTOR, AuditAction::QuickUnlockChanged, None)?;
+        Ok(Json(infos(vault)?))
+    })
+}
+
 #[derive(Deserialize)]
 pub struct BindStart {
     credential_id: String,
+    /// `vault` (mode lié, par défaut) ou `quick` (connexion en un geste).
+    #[serde(default)]
+    purpose: Option<BindPurpose>,
 }
 
 /// Prépare le lien : l'appareil devra signer un défi et calculer sa sortie PRF.
@@ -232,6 +261,7 @@ pub async fn bind_start(
     state.lock_inner().pending_bind = Some(PendingBind {
         challenge,
         credential_id: req.credential_id,
+        purpose: req.purpose.unwrap_or(BindPurpose::Vault),
         expires_at: now() + CHALLENGE_TTL_SECS,
     });
     Ok(Json(options))
@@ -272,8 +302,16 @@ pub async fn bind_finish(
         save_credentials(vault, &creds)?;
         let prf = Zeroizing::new(decode_prf_output(&req.prf_output).map_err(bad)?);
         let pk = vault.password_key(req.passphrase.as_bytes())?;
-        vault.add_factor(&pk, FactorKind::Passkey, &pending.credential_id, &prf)?;
-        vault.audit(ACTOR, AuditAction::FactorBound, None)?;
+        match pending.purpose {
+            BindPurpose::Vault => {
+                vault.add_factor(&pk, FactorKind::Passkey, &pending.credential_id, &prf)?;
+                vault.audit(ACTOR, AuditAction::FactorBound, None)?;
+            }
+            BindPurpose::Quick => {
+                vault.add_quick_factor(&pk, &pending.credential_id, &prf)?;
+                vault.audit(ACTOR, AuditAction::QuickUnlockChanged, None)?;
+            }
+        }
         Ok(Json(infos(vault)?))
     })
     .await
@@ -287,6 +325,7 @@ pub struct SecurityStatus {
     hardware_bound: bool,
     passkeys: usize,
     bound_passkeys: usize,
+    quick_passkeys: usize,
     recovery_codes_remaining: usize,
 }
 
@@ -297,6 +336,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<SecurityStatus
             hardware_bound: vault.is_hardware_bound()?,
             passkeys: credentials(vault)?.len(),
             bound_passkeys: vault.factor_ids(FactorKind::Passkey)?.len(),
+            quick_passkeys: vault.factor_ids(FactorKind::Quick)?.len(),
             recovery_codes_remaining: vault.factor_ids(FactorKind::Recovery)?.len(),
         }))
     })
@@ -502,28 +542,118 @@ pub async fn login_finish(
             None => pending.fresh,
         };
         let (vault, was_unlocked) = take_vault(&mut inner, fresh)?;
+        let outcome = verify_assertion(&state, &vault, &pending.challenge, &req.response);
+        conclude_login(&mut inner, vault, was_unlocked, outcome, now)
+    })
+    .await
+}
 
-        let outcome = credentials(&vault).and_then(|mut creds| {
-            match finish_authentication(
-                &state.config.relying_party,
-                &pending.challenge,
-                &req.response,
-                &mut creds,
-            ) {
-                Ok(_) => {
-                    save_credentials(&vault, &creds)?;
-                    Ok(Some(AuditAction::PasskeyLogin))
-                }
-                Err(WebAuthnError::CloneDetected) => {
-                    tracing::error!("ALERTE : authentificateur cloné détecté");
-                    Ok(None)
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "échec de connexion par clé");
-                    Ok(None)
-                }
+/// Vérifie la signature de l'appareil ; `Ok(None)` si elle est refusée (échec compté).
+fn verify_assertion(
+    state: &AppState,
+    vault: &UnlockedVault,
+    challenge: &phonalys_webauthn::Challenge,
+    response: &AuthenticationResponse,
+) -> Result<Option<AuditAction>, ApiError> {
+    let mut creds = credentials(vault)?;
+    match finish_authentication(&state.config.relying_party, challenge, response, &mut creds) {
+        Ok(_) => {
+            save_credentials(vault, &creds)?;
+            Ok(Some(AuditAction::PasskeyLogin))
+        }
+        Err(WebAuthnError::CloneDetected) => {
+            tracing::error!("ALERTE : authentificateur cloné détecté");
+            Ok(None)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "échec de connexion par clé");
+            Ok(None)
+        }
+    }
+}
+
+// --- Connexion en un geste -------------------------------------------------------------
+
+pub async fn quick_start(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let mut inner = state.lock_inner();
+    if inner.setup_token.is_some() {
+        return Err(ApiError::NotInitialized);
+    }
+    let now = now();
+    let locked = LockedVault::open(&state.config.vault_path)?;
+    locked.check_lockout_at(now as i64)?;
+    let ids = locked.factor_ids(FactorKind::Quick)?;
+    if ids.is_empty() {
+        return Err(ApiError::BadRequest(
+            "la connexion en un geste n'est activée pour aucune clé".into(),
+        ));
+    }
+    if !locked.quick_unlock_allowed()? {
+        return Err(ApiError::StepUpRequired);
+    }
+    let challenge = new_challenge();
+    let options = authentication_options(
+        &state.config.relying_party,
+        &challenge,
+        &ids,
+        Some(&locked.prf_salt()?),
+    );
+    inner.pending_quick = Some(PendingQuick {
+        challenge,
+        expires_at: now + CHALLENGE_TTL_SECS,
+    });
+    Ok(Json(options))
+}
+
+#[derive(Deserialize)]
+pub struct QuickFinish {
+    response: AuthenticationResponse,
+    #[serde(default)]
+    prf_output: Option<Zeroizing<String>>,
+}
+
+pub async fn quick_finish(
+    State(state): State<AppState>,
+    Json(req): Json<QuickFinish>,
+) -> Result<Response, ApiError> {
+    blocking(move || {
+        let mut inner = state.lock_inner();
+        let now = now();
+        let pending = inner
+            .pending_quick
+            .take()
+            .filter(|p| now <= p.expires_at)
+            .ok_or(ApiError::Unauthorized)?;
+        let prf = req
+            .prf_output
+            .as_deref()
+            .ok_or_else(|| {
+                ApiError::BadRequest("cet appareil ne fournit pas l'extension PRF requise".into())
+            })
+            .and_then(|p| decode_prf_output(p).map_err(bad))
+            .map(Zeroizing::new)?;
+
+        // La sortie PRF ouvre le coffre ; la signature du défi prouve ensuite que
+        // l'appareil est bien présent (une sortie PRF interceptée ne suffit pas).
+        let locked = LockedVault::open(&state.config.vault_path)?;
+        let id = req.response.id.trim_end_matches('=');
+        let fresh = match locked.unlock_with_quick_at(id, &prf, now as i64) {
+            Ok(v) => v,
+            Err((locked, e)) => {
+                tracing::warn!(error = %e, "échec de connexion en un geste");
+                return Err(match e {
+                    VaultError::FactorRejected if !locked.quick_unlock_allowed()? => {
+                        ApiError::StepUpRequired
+                    }
+                    VaultError::FactorRejected => {
+                        ApiError::LoginFailed(locked.remaining_attempts()?)
+                    }
+                    e => e.into(),
+                });
             }
-        });
+        };
+        let (vault, was_unlocked) = take_vault(&mut inner, Some(fresh))?;
+        let outcome = verify_assertion(&state, &vault, &pending.challenge, &req.response);
         conclude_login(&mut inner, vault, was_unlocked, outcome, now)
     })
     .await

@@ -47,11 +47,29 @@ pub(crate) struct PendingRegistration {
     pub expires_at: u64,
 }
 
+/// Ce que l'on fait de la sortie PRF d'une clé.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum BindPurpose {
+    /// Lien au coffre : phrase de passe **et** clé (mode lié au matériel).
+    Vault,
+    /// Connexion en un geste : la clé seule.
+    Quick,
+}
+
 /// Lien cryptographique d'une clé en cours (extension PRF).
 #[derive(Debug)]
 pub(crate) struct PendingBind {
     pub challenge: Challenge,
     pub credential_id: String,
+    pub purpose: BindPurpose,
+    pub expires_at: u64,
+}
+
+/// Connexion en un geste en cours : la signature et la sortie PRF sont attendues.
+#[derive(Debug)]
+pub(crate) struct PendingQuick {
+    pub challenge: Challenge,
     pub expires_at: u64,
 }
 
@@ -77,6 +95,7 @@ pub(crate) struct Inner {
     pub pending_login: Option<PendingLogin>,
     pub pending_registration: Option<PendingRegistration>,
     pub pending_bind: Option<PendingBind>,
+    pub pending_quick: Option<PendingQuick>,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +122,7 @@ impl AppState {
                 pending_login: None,
                 pending_registration: None,
                 pending_bind: None,
+                pending_quick: None,
             })),
             config: Arc::new(config),
         };
@@ -149,6 +169,13 @@ impl AppState {
             .is_some_and(|p| now > p.expires_at)
         {
             inner.pending_bind = None;
+        }
+        if inner
+            .pending_quick
+            .as_ref()
+            .is_some_and(|p| now > p.expires_at)
+        {
+            inner.pending_quick = None;
         }
         if !inner.sessions.purge(now) {
             if let Phase::Unlocked(mut vault) = std::mem::replace(&mut inner.phase, Phase::Locked) {

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ApiError } from "./api";
 
 export function describeError(e: unknown): string {
@@ -154,4 +154,81 @@ export function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () =
       </button>
     </section>
   );
+}
+
+export function TextArea(props: { label: string; value: string; onChange: (v: string) => void; rows?: number; hint?: ReactNode }) {
+  return (
+    <label className="field">
+      <span>{props.label}</span>
+      <textarea rows={props.rows ?? 4} value={props.value} onChange={(e) => props.onChange(e.target.value)} />
+      {props.hint ? <small>{props.hint}</small> : null}
+    </label>
+  );
+}
+
+export function Select<T extends string>(props: {
+  label: string;
+  value: T;
+  onChange: (v: T) => void;
+  options: readonly (readonly [T, string])[];
+  hint?: ReactNode;
+}) {
+  return (
+    <label className="field">
+      <span>{props.label}</span>
+      <select value={props.value} onChange={(e) => props.onChange(e.target.value as T)}>
+        {props.options.map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
+      </select>
+      {props.hint ? <small>{props.hint}</small> : null}
+    </label>
+  );
+}
+
+/** Onglets accessibles (rôle tablist). */
+export function Tabs<T extends string>(props: {
+  label: string;
+  value: T;
+  onChange: (v: T) => void;
+  tabs: readonly (readonly [T, string])[];
+}) {
+  return (
+    <div className="tabs" role="tablist" aria-label={props.label}>
+      {props.tabs.map(([v, l]) => (
+        <button
+          key={v}
+          type="button"
+          role="tab"
+          aria-selected={props.value === v}
+          className={props.value === v ? "tab active" : "tab"}
+          onClick={() => props.onChange(v)}
+        >
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Charge une donnée au montage et à la demande (`reload`). */
+export function useLoad<T>(load: () => Promise<T>, deps: readonly unknown[] = []) {
+  const [data, setData] = useState<T>();
+  const [error, setError] = useState<string>();
+  // Les dépendances sont fournies par l'appelant.
+  const run = useCallback(load, deps);
+  const reload = useCallback(() => {
+    setError(undefined);
+    run()
+      .then(setData)
+      .catch((e: unknown) => setError(describeError(e)));
+  }, [run]);
+  useEffect(reload, [reload]);
+  return { data, error, reload, setData };
+}
+
+export function Empty({ children }: { children: ReactNode }) {
+  return <p className="muted empty">{children}</p>;
 }

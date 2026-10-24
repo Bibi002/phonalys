@@ -19,7 +19,7 @@
 //! matériel » (voir [`factors`]) où la phrase de passe seule ne suffit plus.
 
 mod factors;
-pub use factors::{FactorKind, PasswordKey};
+pub use factors::{FactorKind, PasswordKey, QUICK_MAX_FAILURES};
 
 use phonalys_core::audit::{AuditAction, AuditEntry, AuditLog};
 use phonalys_crypto::{
@@ -60,6 +60,8 @@ pub enum VaultError {
     HardwareBound,
     #[error("second facteur refusé")]
     FactorRejected,
+    #[error("après plusieurs échecs, la phrase de passe et un second facteur sont exigés")]
+    StepUpRequired,
     #[error("opération impossible : {0}")]
     Precondition(&'static str),
     #[error("intégrité compromise : {0}")]
@@ -360,6 +362,11 @@ impl LockedVault {
     /// Essais restants avant le blocage de la connexion normale.
     pub fn remaining_attempts(&self) -> Result<u32, VaultError> {
         remaining(&self.conn)
+    }
+
+    /// Erreur [`VaultError::TooManyAttempts`] si la connexion est bloquée à `now`.
+    pub fn check_lockout_at(&self, now: i64) -> Result<(), VaultError> {
+        check_lockout(&self.conn, now)
     }
 }
 

@@ -13,10 +13,22 @@ function jsonResponse(status: number, body?: unknown) {
   return new Response(body === undefined ? null : JSON.stringify(body), { status });
 }
 
+/** Simule le serveur : `/api/status` répond toujours, le reste passe par `handler`. */
+function server(handler: (url: string, init?: RequestInit) => Response, status: Record<string, unknown> = {}) {
+  const fn = vi.fn(async (url: string, init?: RequestInit) =>
+    url === "/api/status" ? jsonResponse(200, { initialized: true, ...status }) : handler(url, init),
+  );
+  vi.stubGlobal("fetch", fn);
+  return fn;
+}
+
+function callsTo(fn: ReturnType<typeof server>, path: string) {
+  return (fn.mock.calls as unknown as [string, RequestInit][]).filter(([u]) => u === path);
+}
+
 describe("connexion", () => {
   it("envoie la phrase de passe et le code TOTP, puis efface les champs", async () => {
-    const fetch = vi.fn(async () => jsonResponse(204));
-    vi.stubGlobal("fetch", fetch);
+    const fetch = server(() => jsonResponse(204));
     const onLoggedIn = vi.fn();
     render(<Login onLoggedIn={onLoggedIn} />);
 
@@ -26,8 +38,7 @@ describe("connexion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Déverrouiller" }));
 
     await waitFor(() => expect(onLoggedIn).toHaveBeenCalled());
-    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("/api/login");
+    const [[, init]] = callsTo(fetch, "/api/login") as [[string, RequestInit]];
     expect(JSON.parse(init.body as string)).toEqual({ passphrase: "ma phrase de passe", code: "123456" });
     expect((screen.getByLabelText("Phrase de passe") as HTMLInputElement).value).toBe("");
   });
@@ -66,14 +77,17 @@ describe("verrouillage automatique", () => {
     let now = 0;
     const last = { current: 0 };
     const onExpired = vi.fn();
-    render(<SessionTimer idleSecs={90} lastActivity={last} onExpired={onExpired} now={() => now} />);
-    screen.getByText(/Verrouillage dans 1:30/);
+    render(<SessionTimer idleSecs={300} lastActivity={last} onExpired={onExpired} now={() => now} />);
+    // Discret tant qu'il reste du temps.
+    screen.getByText(/Verrouillage auto : 5 min/);
+    expect(screen.queryByRole("button", { name: "Rester connecté" })).toBeNull();
 
-    now = 40_000;
+    now = 210_000;
     act(() => void vi.advanceTimersByTime(1000));
+    screen.getByText(/verrouillage dans 1:30/);
     screen.getByRole("button", { name: "Rester connecté" });
 
-    now = 91_000;
+    now = 301_000;
     act(() => void vi.advanceTimersByTime(1000));
     expect(onExpired).toHaveBeenCalled();
   });
@@ -120,7 +134,7 @@ describe("connexion : accompagnement", () => {
       jsonResponse(401, { error: "identifiants incorrects : encore 1 essai avant le blocage", remaining_attempts: 1 }),
       jsonResponse(429, { error: "connexion bloquée après 4 échecs : réessayez dans 15 min, ou utilisez un code de récupération pour débloquer tout de suite", retry_after_secs: 900 }),
     ];
-    vi.stubGlobal("fetch", vi.fn(async () => replies.shift() as Response));
+    server(() => replies.shift() as Response);
     render(<Login onLoggedIn={() => undefined} />);
     fireEvent.change(screen.getByLabelText("Phrase de passe"), { target: { value: "x" } });
     fireEvent.change(screen.getByLabelText(/Code de l'application/), { target: { value: "000000" } });
@@ -141,5 +155,13 @@ describe("connexion : accompagnement", () => {
     expect(input.type).toBe("password");
     fireEvent.click(screen.getByRole("button", { name: "Afficher" }));
     expect(input.type).toBe("text");
+  });
+});
+describe("connexion : double vérification", () => {
+  it("après 3 échecs, explique que deux vérifications sont demandées", async () => {
+    server(() => jsonResponse(204), { quick_unlock: true, step_up: true });
+    render(<Login onLoggedIn={() => undefined} />);
+    expect((await screen.findByText(/Après 3 échecs, deux vérifications/)).className).toBe("warning");
+    screen.getByLabelText("Phrase de passe");
   });
 });

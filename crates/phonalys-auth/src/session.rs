@@ -48,6 +48,12 @@ impl SessionStore {
         self.config
     }
 
+    /// Change le délai d'inactivité (réglage du praticien). S'applique aussi aux
+    /// sessions déjà ouvertes.
+    pub fn set_idle_timeout(&mut self, secs: u64) {
+        self.config.idle_timeout_secs = secs;
+    }
+
     /// Ouvre une session et renvoie le jeton à placer dans le cookie.
     pub fn create(&mut self, now: u64) -> String {
         let mut raw = [0u8; 32];
