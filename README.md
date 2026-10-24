@@ -27,7 +27,7 @@ Phonalys s'adresse aux logopèdes indépendants. Le praticien fait passer ses é
 | `crates/phonalys-webauthn` | Clés biométriques et de sécurité (WebAuthn/FIDO2), vérifiées sans OpenSSL | ✅ testé |
 | `crates/phonalys-server` | Serveur TLS 1.3 : installation, connexion 2FA, verrouillage auto, API patients | ✅ testé |
 | `web` | Interface React + TypeScript servie par le serveur, installable en PWA (iPhone, Android) | ✅ testé |
-| `apps/desktop` | Application Tauri (Windows, Linux) | ⏳ phase 3 |
+| `apps/desktop` | Application Tauri 2 (Windows, Linux) avec serveur embarqué sur la boucle locale | ✅ compile, lancement vérifié |
 
 ## Développement
 
@@ -40,13 +40,22 @@ cd web && npm ci && npm test && npm run build && cd ..   # interface (web/dist)
 cargo run -p phonalys-server    # écoute sur https://127.0.0.1:8443 (TLS 1.3)
 ```
 
-Au premier démarrage, la console affiche un **jeton d'installation à usage unique** et l'**empreinte SHA-256 du certificat**. Notez l'empreinte, puis vérifiez-la sur chaque appareil que vous connectez.
+Application de bureau (espace de travail séparé, car Tauri apporte ses dépendances graphiques) :
+
+```sh
+cd web && npm run build && cd ..
+cargo run --manifest-path apps/desktop/Cargo.toml
+```
+
+Sous Linux, installez d'abord `libwebkit2gtk-4.1-dev`, `librsvg2-dev` et `libxdo-dev`. Les installateurs (MSI, NSIS, .deb, .rpm, AppImage) se construisent avec `npx @tauri-apps/cli build` depuis `apps/desktop`.
+
+Au premier démarrage du serveur autonome, la console affiche un **jeton d'installation à usage unique** et l'**empreinte SHA-256 du certificat**. Notez l'empreinte, puis vérifiez-la sur chaque appareil que vous connectez.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `PHONALYS_DATA_DIR` | `%LOCALAPPDATA%\Phonalys` / `~/.local/share/Phonalys` | Coffre et certificat |
 | `PHONALYS_BIND` | `127.0.0.1:8443` | Adresse d'écoute (`0.0.0.0:8443` pour le réseau local) |
-| `PHONALYS_PUBLIC_ORIGIN` | `https://localhost:8443` | Adresse exacte utilisée par les appareils, qui sert d'identité WebAuthn (nom de domaine obligatoire) |
+| `PHONALYS_PUBLIC_ORIGIN` | `https://localhost:8443` | Adresse exacte utilisée par les appareils, qui sert d'identité WebAuthn (nom de domaine obligatoire). **Seule cette adresse est acceptée** (protection contre le DNS rebinding) |
 | `PHONALYS_TLS_NAMES` | — | Noms et adresses IP supplémentaires du certificat, par exemple `phonalys.lan,192.168.1.20` |
 | `PHONALYS_WEB_DIR` | `web` à côté de l'exécutable, sinon `web/dist` | Dossier de l'interface compilée |
 | `PHONALYS_INSECURE_HTTP` | — | `1` = HTTP en clair, **refusé hors de 127.0.0.1** (développement) |

@@ -16,6 +16,7 @@ use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use error::ApiError;
 use serde::Serialize;
+use std::sync::Arc;
 use std::time::Duration;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -65,17 +66,64 @@ async fn health() -> Json<Health> {
     })
 }
 
+/// Adresse demandée par le client : l'en-tête `Host` en HTTP/1.1, le pseudo-en-tête
+/// `:authority` (porté par l'URI) en HTTP/2, où `Host` est généralement absent.
+fn authority(req: &Request) -> Option<String> {
+    req.headers()
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .map(str::to_owned)
+        .or_else(|| req.uri().authority().map(|a| a.as_str().to_owned()))
+        .map(|a| a.to_ascii_lowercase())
+}
+
+/// Adresses acceptées : celles des origines publiques du serveur, avec et sans port
+/// par défaut.
+fn allowed_authorities(origins: &[String]) -> Vec<String> {
+    origins
+        .iter()
+        .filter_map(|o| url::Url::parse(o).ok())
+        .flat_map(|u| {
+            let host = u.host_str().unwrap_or_default().to_ascii_lowercase();
+            let port = u.port_or_known_default().unwrap_or_default();
+            let mut list = vec![format!("{host}:{port}")];
+            if u.port().is_none() {
+                list.push(host);
+            }
+            list
+        })
+        .collect()
+}
+
+/// Refuse toute requête adressée à un autre nom que celui du serveur. Bloque le
+/// « DNS rebinding » : un site malveillant dont le domaine pointerait vers
+/// 127.0.0.1 ou vers le serveur du cabinet ne peut pas lui parler.
+async fn host_guard(allowed: Arc<Vec<String>>, req: Request, next: Next) -> Response {
+    match authority(&req) {
+        Some(a) if allowed.contains(&a) => next.run(req).await,
+        _ => {
+            tracing::warn!(authority = ?authority(&req), "requête adressée à un nom non autorisé");
+            let hint = allowed
+                .first()
+                .map_or_else(String::new, |a| format!(" : utilisez {a}"));
+            (
+                StatusCode::MISDIRECTED_REQUEST,
+                format!("adresse non autorisée{hint}"),
+            )
+                .into_response()
+        }
+    }
+}
+
 /// Refuse les requêtes modifiantes sans en-tête anti-CSRF ou venant d'une autre origine.
 async fn csrf_guard(req: Request, next: Next) -> Response {
     let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
     if !safe {
-        let headers = req.headers();
-        let marked = headers.get(CSRF_HEADER).is_some_and(|v| v == "1");
-        let same_origin = match (headers.get(header::ORIGIN), headers.get(header::HOST)) {
+        let marked = req.headers().get(CSRF_HEADER).is_some_and(|v| v == "1");
+        let same_origin = match (req.headers().get(header::ORIGIN), authority(&req)) {
             (None, _) => true,
             (Some(origin), Some(host)) => {
-                let origin = origin.to_str().unwrap_or_default();
-                let host = host.to_str().unwrap_or_default();
+                let origin = origin.to_str().unwrap_or_default().to_ascii_lowercase();
                 origin == format!("https://{host}") || origin == format!("http://{host}")
             }
             (Some(_), None) => false,
@@ -127,6 +175,7 @@ pub fn app(state: AppState) -> Router {
         ));
 
     let web_dir = state.config.web_dir.clone();
+    let allowed = Arc::new(allowed_authorities(&state.config.relying_party.origins));
     let api = Router::new()
         .route("/api/health", get(health))
         .route("/api/status", get(api::status))
@@ -148,6 +197,9 @@ pub fn app(state: AppState) -> Router {
 
     let mut router = api
         .layer(middleware::from_fn(csrf_guard))
+        .layer(middleware::from_fn(move |req, next| {
+            host_guard(allowed.clone(), req, next)
+        }))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES));
     for (name, value) in SECURITY_HEADERS {
         router = router.layer(SetResponseHeaderLayer::overriding(

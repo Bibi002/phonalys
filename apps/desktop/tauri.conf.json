@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Phonalys",
+  "version": "0.1.0",
+  "identifier": "be.phonalys.desktop",
+  "build": {},
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": {
+      "csp": null,
+      "freezePrototype": true,
+      "capabilities": []
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis", "deb", "rpm", "appimage"],
+    "publisher": "Phonalys",
+    "category": "Medical",
+    "shortDescription": "Bilans logopédiques, auto-hébergés et chiffrés",
+    "copyright": "Tous droits réservés",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": { "../../web/dist/": "web/" },
+    "windows": { "webviewInstallMode": { "type": "embedBootstrapper" } }
+  }
+}

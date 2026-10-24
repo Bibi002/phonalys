@@ -1123,3 +1123,72 @@ async fn patient_can_be_updated_but_not_created_by_put() {
         .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
 }
+
+// --- Contrôle de l'adresse (DNS rebinding) et HTTP/2 -------------------------------------
+
+async fn send(h: &Harness, req: Request<Body>) -> StatusCode {
+    app(h.state.clone()).oneshot(req).await.unwrap().status()
+}
+
+#[tokio::test]
+async fn foreign_host_is_refused() {
+    let h = Harness::new();
+    for host in [
+        "evil.example",
+        "localhost:9999",
+        "127.0.0.1:8443",
+        "phonalys.lan:8443",
+    ] {
+        let req = Request::builder()
+            .uri("/api/status")
+            .header("host", host)
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            send(&h, req).await,
+            StatusCode::MISDIRECTED_REQUEST,
+            "{host}"
+        );
+    }
+    let req = Request::builder()
+        .uri("/api/status")
+        .header("host", "LOCALHOST:8443")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(send(&h, req).await, StatusCode::OK, "casse ignorée");
+}
+
+#[tokio::test]
+async fn http2_requests_without_host_header_work() {
+    // En HTTP/2, le navigateur n'envoie que :authority, porté par l'URI.
+    let h = Harness::new();
+    let req = Request::builder()
+        .method("POST")
+        .uri("https://localhost:8443/api/setup")
+        .header("origin", ORIGIN)
+        .header(CSRF_HEADER, "1")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({ "setup_token": h.setup_token, "passphrase": PASSPHRASE }).to_string(),
+        ))
+        .unwrap();
+    assert_eq!(send(&h, req).await, StatusCode::CREATED);
+
+    // Une origine étrangère reste refusée.
+    let req = Request::builder()
+        .method("POST")
+        .uri("https://localhost:8443/api/login")
+        .header("origin", "https://evil.example")
+        .header(CSRF_HEADER, "1")
+        .header("content-type", "application/json")
+        .body(Body::from(json!({ "passphrase": PASSPHRASE }).to_string()))
+        .unwrap();
+    assert_eq!(send(&h, req).await, StatusCode::FORBIDDEN);
+
+    // Ni Host ni :authority : refus.
+    let req = Request::builder()
+        .uri("/api/status")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(send(&h, req).await, StatusCode::MISDIRECTED_REQUEST);
+}

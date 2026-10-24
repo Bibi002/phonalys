@@ -78,3 +78,15 @@ describe("verrouillage automatique", () => {
     expect(onExpired).toHaveBeenCalled();
   });
 });
+
+describe("installation depuis l'application de bureau", () => {
+  it("lit le jeton dans le fragment puis l'efface de l'adresse", async () => {
+    const { takeSetupToken } = await import("./screens/Setup");
+    history.replaceState(null, "", "/#setup=ABCDEF234567");
+    expect(takeSetupToken()).toBe("ABCDEF234567");
+    expect(window.location.hash).toBe("");
+    expect(takeSetupToken()).toBe("");
+    history.replaceState(null, "", "/#setup=<script>");
+    expect(takeSetupToken()).toBe("");
+  });
+});

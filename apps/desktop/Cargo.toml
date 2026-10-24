@@ -1,0 +1,42 @@
+[package]
+name = "phonalys-desktop"
+description = "Application de bureau Phonalys (Windows, Linux) : serveur local embarqué."
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "LicenseRef-Phonalys-Proprietary"
+publish = false
+
+# Espace de travail séparé : les dépendances graphiques de Tauri restent hors du cœur.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+phonalys-server = { path = "../../crates/phonalys-server" }
+phonalys-auth = { path = "../../crates/phonalys-auth" }
+phonalys-crypto = { path = "../../crates/phonalys-crypto" }
+phonalys-webauthn = { path = "../../crates/phonalys-webauthn" }
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["net"] }
+axum = "0.8"
+url = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "deny"
+dbg_macro = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+overflow-checks = true

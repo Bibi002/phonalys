@@ -2,8 +2,19 @@ import { useState, type FormEvent } from "react";
 import { api, type SetupResult } from "../api";
 import { ErrorBox, Field, RecoveryCodes, useAction } from "../components";
 
+/**
+ * Jeton d'installation transmis par l'application de bureau dans le fragment de l'URL
+ * (`#setup=…`), qui n'est jamais envoyé sur le réseau. Il est effacé dès sa lecture.
+ */
+export function takeSetupToken(): string {
+  const match = /^#setup=([A-Z2-7]+)$/.exec(window.location.hash);
+  if (!match?.[1]) return "";
+  history.replaceState(null, "", window.location.pathname + window.location.search);
+  return match[1];
+}
+
 export function Setup({ onDone }: { onDone: () => void }) {
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(takeSetupToken);
   const [name, setName] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [confirm, setConfirm] = useState("");

@@ -10,6 +10,8 @@ members = [
     "crates/phonalys-webauthn",
     "crates/phonalys-server",
 ]
+# Application de bureau : espace de travail séparé (Tauri et ses dépendances graphiques).
+exclude = ["apps/desktop"]
 
 [workspace.package]
 version = "0.1.0"

@@ -1,4 +1,6 @@
-/target
+target/
+# Généré par tauri-build
+apps/desktop/gen/
 node_modules/
 dist/
 *.log

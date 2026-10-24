@@ -31,8 +31,11 @@
 - [x] Compatible avec la CSP stricte (aucun script ni style en ligne, contrôlé à chaque compilation)
 - [x] PWA : manifest et service worker qui ne met **jamais** en cache les données de l'API
 - [ ] Audit d'accessibilité WCAG 2.2 AA ; traductions néerlandaise et allemande
-- [ ] Icônes PNG pour iOS (apple-touch-icon)
-- [ ] Application de bureau Tauri 2 : installateurs MSI signés (Windows), .deb, .rpm et AppImage (Linux)
+- [x] Icônes PNG pour iOS (apple-touch-icon)
+- [x] Application de bureau Tauri 2 : serveur embarqué sur la boucle locale (port aléatoire), navigation verrouillée, aucune commande native exposée, jeton d'installation transmis hors réseau
+- [ ] Installateurs **signés** : MSI (Windows), .deb, .rpm et AppImage (Linux) ; mises à jour signées
+- [ ] Bureau : verrouillage à la mise en veille et au verrouillage de session du système
+- [ ] Bureau sous Linux : WebKitGTK ne gère pas encore WebAuthn (connexion par code TOTP en attendant)
 - [ ] Synchronisation en temps réel (WebSocket), fonctionnement hors ligne
 
 ## Phase 4 — Clinique

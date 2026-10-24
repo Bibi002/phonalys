@@ -51,7 +51,10 @@ On parle souvent de « chiffrement de niveau militaire » : concrètement, ce so
 | Échecs | Délai exponentiel à partir du 4e échec, plafonné à 15 min. Un second facteur faux compte comme un échec. Les essais sont traités un par un. |
 | Sessions | Jeton de 256 bits, dont seule l'empreinte reste en mémoire. Cookie `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`. Expiration après 5 min d'inactivité ou 8 h au total. |
 | Verrouillage | Sans session active, les clés sont effacées de la mémoire. `/api/lock` verrouille immédiatement tous les appareils. |
-| CSRF | Les requêtes qui modifient l'état exigent un en-tête dédié et une origine identique à celle du serveur. |
+| CSRF | Les requêtes qui modifient l'état exigent un en-tête dédié et une origine identique à celle du serveur (en HTTP/1.1 comme en HTTP/2). |
+| DNS rebinding | Le serveur ne répond qu'aux requêtes adressées à son nom public (`PHONALYS_PUBLIC_ORIGIN`). Un site malveillant dont le domaine pointerait vers le serveur ou vers 127.0.0.1 reçoit un refus (421). |
+| Application web | CSP stricte (aucun script ni style en ligne, vérifié à chaque compilation). Le service worker ne met en cache que l'interface, **jamais** les réponses de l'API. Aucun stockage local des données dans le navigateur. |
+| Application de bureau | Serveur embarqué à l'écoute de la seule boucle locale, port aléatoire. La fenêtre ne peut naviguer vers aucune autre adresse et n'a accès à aucune commande native. |
 | TLS | TLS 1.3 uniquement. Certificat auto-signé dont l'empreinte SHA-256 est à épingler. |
 
 ### Biométrie et RGPD

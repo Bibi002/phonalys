@@ -1,0 +1,44 @@
+# Politique de la chaîne d'approvisionnement de l'application de bureau.
+# Identique à celle du cœur, avec deux exceptions justifiées, propres à Tauri.
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+    # proc-macro-error : macro de compilation (liaisons GTK, Linux uniquement), sans code
+    # exécuté dans l'application. À retirer quand gtk-rs aura migré.
+    { id = "RUSTSEC-2024-0370", reason = "macro de compilation, Linux uniquement, via gtk-rs" },
+]
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    # cssparser, selectors, dom_query (Servo, via tauri-utils) : copyleft faible au niveau
+    # du fichier, compatible avec un logiciel propriétaire tant que ces fichiers ne sont
+    # pas modifiés. Leur source reste disponible sur crates.io.
+    "MPL-2.0",
+]
+confidence-threshold = 0.9
+private = { ignore = true }
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Les crates internes (publish = false) se référencent par chemin, sans version.
+allow-wildcard-paths = true
+# OpenSSL est exclu : tout le TLS passe par rustls.
+deny = [{ name = "openssl" }, { name = "openssl-sys" }]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
