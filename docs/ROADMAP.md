@@ -20,7 +20,7 @@
 - [x] Serveur : jeton d'installation à usage unique, cookie `__Host-`, protection CSRF (en-tête et origine)
 - [x] TLS 1.3 uniquement (rustls), certificat auto-signé, empreinte affichée
 - [x] **WebAuthn / FIDO2 biométrique** : vérification de l'utilisateur obligatoire, ES256 et Ed25519, détection des clones, politique « clé obligatoire »
-- [ ] Extension **PRF** : lier cryptographiquement la clé du coffre à l'authentificateur
+- [x] Extension **PRF** : mode « lié au matériel », clé du coffre dépendant de la phrase de passe **et** de l'authentificateur ; codes de récupération cryptographiques (format de coffre v2, migration automatique depuis v1)
 - [ ] Option « biométrie stricte » : liste blanche d'AAGUID (YubiKey Bio…)
 - [ ] Sauvegardes chiffrées, restauration testée, migrations de schéma
 - [ ] Appairage des appareils par QR code (avec l'empreinte du certificat)

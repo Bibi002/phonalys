@@ -15,7 +15,11 @@
 //!
 //! Limite assumée : le délai après échecs ralentit les essais *via l'application*.
 //! Un attaquant qui copie le fichier n'est freiné que par Argon2id (256 MiB par essai),
-//! d'où l'exigence d'une phrase de passe robuste.
+//! d'où l'exigence d'une phrase de passe robuste — ou, mieux, le mode « lié au
+//! matériel » (voir [`factors`]) où la phrase de passe seule ne suffit plus.
+
+mod factors;
+pub use factors::{FactorKind, PasswordKey};
 
 use phonalys_core::audit::{AuditAction, AuditEntry, AuditLog};
 use phonalys_crypto::{
@@ -27,7 +31,7 @@ use std::path::Path;
 use time::OffsetDateTime;
 use zeroize::Zeroizing;
 
-const FORMAT_VERSION: i64 = 1;
+const FORMAT_VERSION: i64 = 2;
 const MASTER_CONTEXT: &[u8] = b"phonalys:v1:master";
 const AUDIT_KEY_SECRET: &str = "audit-key";
 /// Nombre d'échecs tolérés avant d'imposer un délai.
@@ -51,6 +55,12 @@ pub enum VaultError {
     RecordNotFound,
     #[error("type d'enregistrement invalide")]
     InvalidKind,
+    #[error("coffre lié au matériel : une clé biométrique ou un code de récupération est requis")]
+    HardwareBound,
+    #[error("second facteur refusé")]
+    FactorRejected,
+    #[error("opération impossible : {0}")]
+    Precondition(&'static str),
     #[error("intégrité compromise : {0}")]
     Integrity(String),
     #[error("erreur de stockage : {0}")]
@@ -85,9 +95,16 @@ CREATE TABLE meta (
     kdf_iterations INTEGER NOT NULL,
     kdf_parallelism INTEGER NOT NULL,
     wrapped_master BLOB NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    prf_salt BLOB NOT NULL
 );
 CREATE TABLE secrets (name TEXT PRIMARY KEY, sealed BLOB NOT NULL);
+CREATE TABLE factor_wraps (
+    kind TEXT NOT NULL,
+    id TEXT NOT NULL,
+    blob BLOB NOT NULL,
+    PRIMARY KEY (kind, id)
+);
 CREATE TABLE records (
     kind TEXT NOT NULL,
     id TEXT NOT NULL,
@@ -104,6 +121,35 @@ CREATE TABLE lockout (
 );
 INSERT INTO lockout (id, failures, next_attempt_at) VALUES (1, 0, 0);
 ";
+
+/// Migration du format 1 (phase 2) vers le format 2 (facteurs liés au matériel).
+const MIGRATION_1_TO_2: &str = "
+ALTER TABLE meta ADD COLUMN prf_salt BLOB;
+CREATE TABLE factor_wraps (
+    kind TEXT NOT NULL,
+    id TEXT NOT NULL,
+    blob BLOB NOT NULL,
+    PRIMARY KEY (kind, id)
+);
+";
+
+fn migrate(conn: &Connection) -> Result<(), VaultError> {
+    let format: i64 = conn.query_row("SELECT format FROM meta WHERE id = 1", [], |r| r.get(0))?;
+    match format {
+        FORMAT_VERSION => Ok(()),
+        1 => {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(MIGRATION_1_TO_2)?;
+            tx.execute(
+                "UPDATE meta SET prf_salt = ?1, format = ?2 WHERE id = 1",
+                params![factors::random_salt().as_slice(), FORMAT_VERSION],
+            )?;
+            tx.commit()?;
+            Ok(())
+        }
+        other => Err(VaultError::UnsupportedFormat(other)),
+    }
+}
 
 /// Restreint les droits du fichier au seul propriétaire (Unix).
 /// Sous Windows, le fichier hérite des ACL du profil utilisateur.
@@ -151,7 +197,7 @@ impl LockedVault {
         let kek = derive_kek(password, &salt, params)?;
         let master = SecretKey::generate();
         conn.execute(
-            "INSERT INTO meta VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO meta VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 FORMAT_VERSION,
                 salt.as_slice(),
@@ -160,6 +206,7 @@ impl LockedVault {
                 params.parallelism,
                 wrap_key(&kek, &master, MASTER_CONTEXT)?,
                 now_rfc3339(),
+                factors::random_salt().as_slice(),
             ],
         )?;
 
@@ -180,11 +227,7 @@ impl LockedVault {
         }
         let conn = Connection::open(path)?;
         configure(&conn)?;
-        let format: i64 =
-            conn.query_row("SELECT format FROM meta WHERE id = 1", [], |r| r.get(0))?;
-        if format != FORMAT_VERSION {
-            return Err(VaultError::UnsupportedFormat(format));
-        }
+        migrate(&conn)?;
         Ok(Self { conn })
     }
 
@@ -199,10 +242,15 @@ impl LockedVault {
     /// Déverrouille à l'instant `now` (secondes Unix) ; en cas d'échec, rend le coffre.
     #[allow(clippy::result_large_err)]
     pub fn unlock_at(self, password: &[u8], now: i64) -> Result<UnlockedVault, (Self, VaultError)> {
-        let master = match self.try_unlock(password, now) {
-            Ok(master) => master,
-            Err(e) => return Err((self, e)),
-        };
+        match self.try_unlock(password, now) {
+            Ok(master) => self.finish_unlock(master),
+            Err(e) => Err((self, e)),
+        }
+    }
+
+    /// Termine un déverrouillage : recharge et vérifie le journal d'audit.
+    #[allow(clippy::result_large_err)]
+    fn finish_unlock(self, master: SecretKey) -> Result<UnlockedVault, (Self, VaultError)> {
         match Self::load_audit(&self.conn, &master) {
             Ok(audit) => Ok(UnlockedVault {
                 conn: self.conn,
@@ -214,34 +262,17 @@ impl LockedVault {
     }
 
     fn try_unlock(&self, password: &[u8], now: i64) -> Result<SecretKey, VaultError> {
-        let next_at: i64 = self.conn.query_row(
-            "SELECT next_attempt_at FROM lockout WHERE id = 1",
-            [],
-            |r| r.get(0),
-        )?;
-        if now < next_at {
-            return Err(VaultError::TooManyAttempts(next_at - now));
+        let wrapped = wrapped_master(&self.conn)?;
+        if wrapped.is_empty() {
+            // Sans facteur matériel, la phrase de passe seule ne peut rien ouvrir.
+            check_lockout(&self.conn, now)?;
+            return Err(VaultError::HardwareBound);
         }
-
-        let (salt, m, t, p, wrapped): (Vec<u8>, u32, u32, u32, Vec<u8>) = self.conn.query_row(
-            "SELECT kdf_salt, kdf_memory_kib, kdf_iterations, kdf_parallelism, wrapped_master
-             FROM meta WHERE id = 1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-        )?;
-        let salt: [u8; SALT_LEN] = salt
-            .try_into()
-            .map_err(|_| VaultError::Integrity("sel invalide".into()))?;
-        let params = KdfParams {
-            memory_kib: m,
-            iterations: t,
-            parallelism: p,
-        };
-        let kek = derive_kek(password, &salt, params)?;
+        let pk = self.password_key_at(password, now)?;
 
         // Le compteur n'est remis à zéro qu'après l'authentification complète
         // (voir `UnlockedVault::reset_lockout`) : un second facteur faux compte aussi.
-        match unwrap_key(&kek, &wrapped, MASTER_CONTEXT) {
+        match unwrap_key(&pk.kek, &wrapped, MASTER_CONTEXT) {
             Ok(master) => Ok(master),
             Err(_) => {
                 register_failure(&self.conn, now)?;
@@ -249,6 +280,44 @@ impl LockedVault {
             }
         }
     }
+}
+
+fn check_lockout(conn: &Connection, now: i64) -> Result<(), VaultError> {
+    let next_at: i64 = conn.query_row(
+        "SELECT next_attempt_at FROM lockout WHERE id = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    if now < next_at {
+        return Err(VaultError::TooManyAttempts(next_at - now));
+    }
+    Ok(())
+}
+
+fn wrapped_master(conn: &Connection) -> Result<Vec<u8>, VaultError> {
+    Ok(
+        conn.query_row("SELECT wrapped_master FROM meta WHERE id = 1", [], |r| {
+            r.get(0)
+        })?,
+    )
+}
+
+/// Dérive la KEK de la phrase de passe avec les paramètres stockés (Argon2id).
+fn derive_stored_kek(conn: &Connection, password: &[u8]) -> Result<SecretKey, VaultError> {
+    let (salt, m, t, p): (Vec<u8>, u32, u32, u32) = conn.query_row(
+        "SELECT kdf_salt, kdf_memory_kib, kdf_iterations, kdf_parallelism FROM meta WHERE id = 1",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
+    let salt: [u8; SALT_LEN] = salt
+        .try_into()
+        .map_err(|_| VaultError::Integrity("sel invalide".into()))?;
+    let params = KdfParams {
+        memory_kib: m,
+        iterations: t,
+        parallelism: p,
+    };
+    Ok(derive_kek(password, &salt, params)?)
 }
 
 fn register_failure(conn: &Connection, now: i64) -> Result<(), VaultError> {
@@ -291,28 +360,6 @@ impl UnlockedVault {
             [],
         )?;
         Ok(())
-    }
-
-    /// Change la phrase de passe : seule l'enveloppe de la clé maîtresse est refaite.
-    pub fn change_password(
-        &mut self,
-        new_password: &[u8],
-        params: KdfParams,
-    ) -> Result<(), VaultError> {
-        let salt = generate_salt();
-        let kek = derive_kek(new_password, &salt, params)?;
-        self.conn.execute(
-            "UPDATE meta SET kdf_salt = ?1, kdf_memory_kib = ?2, kdf_iterations = ?3,
-             kdf_parallelism = ?4, wrapped_master = ?5 WHERE id = 1",
-            params![
-                salt.as_slice(),
-                params.memory_kib,
-                params.iterations,
-                params.parallelism,
-                wrap_key(&kek, &self.master, MASTER_CONTEXT)?,
-            ],
-        )?;
-        self.audit("praticien", AuditAction::PasswordChanged, None)
     }
 
     /// Enregistre (ou remplace) un enregistrement chiffré. Une nouvelle clé de données

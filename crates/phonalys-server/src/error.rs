@@ -59,6 +59,13 @@ impl From<VaultError> for ApiError {
             VaultError::NotFound => ApiError::NotInitialized,
             VaultError::WrongPassword => ApiError::Unauthorized,
             VaultError::TooManyAttempts(s) => ApiError::TooManyAttempts(s),
+            VaultError::FactorRejected => ApiError::Unauthorized,
+            VaultError::HardwareBound => ApiError::BadRequest(
+                "coffre lié au matériel : connectez-vous avec votre clé biométrique".into(),
+            ),
+            VaultError::Precondition(m) => {
+                ApiError::BadRequest(format!("opération impossible : {m}"))
+            }
             other => {
                 tracing::error!(error = %other, "erreur du coffre");
                 ApiError::Internal

@@ -49,12 +49,16 @@ impl RecoveryCodes {
 
 /// Empreinte d'un code normalisé (casse, tirets et espaces ignorés).
 fn digest(code: &str) -> [u8; 32] {
-    let normalized: String = code
-        .chars()
+    Sha256::digest(normalize(code).as_bytes()).into()
+}
+
+/// Forme canonique d'un code saisi : casse, tirets et espaces ignorés. C'est cette forme
+/// qui sert de secret pour les enveloppes de récupération du coffre.
+pub fn normalize(code: &str) -> String {
+    code.chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .map(|c| c.to_ascii_uppercase())
-        .collect();
-    Sha256::digest(normalized.as_bytes()).into()
+        .collect()
 }
 
 #[cfg(test)]

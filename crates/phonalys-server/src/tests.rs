@@ -92,11 +92,16 @@ impl Harness {
     }
 
     async fn login(&self, totp: &Totp) -> String {
+        self.login_at(totp, state::now()).await
+    }
+
+    /// Connexion avec le code TOTP d'un instant donné (évite l'anti-rejeu).
+    async fn login_at(&self, totp: &Totp, at: u64) -> String {
         let (status, headers, body) = self
             .call(
                 "POST",
                 "/api/login",
-                Some(json!({ "passphrase": PASSPHRASE, "code": totp.code_at(state::now()) })),
+                Some(json!({ "passphrase": PASSPHRASE, "code": totp.code_at(at) })),
                 None,
             )
             .await;
@@ -448,16 +453,69 @@ impl Harness {
             .await;
         assert_eq!(s, StatusCode::OK, "{options}");
         let response = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+        // Comme un navigateur : la sortie PRF n'est calculée que si le serveur fournit un sel.
+        let mut body = json!({ "response": response });
+        if let Some(salt) = prf_salt(&options) {
+            body["prf_output"] = json!(device.prf_b64(&salt));
+        }
         let (s, headers, _) = self
-            .call(
-                "POST",
-                "/api/login/passkey/finish",
-                Some(json!({ "response": response })),
-                None,
-            )
+            .call("POST", "/api/login/passkey/finish", Some(body), None)
             .await;
         (s, headers)
     }
+
+    /// Lie une clé déjà inscrite au coffre (extension PRF).
+    async fn bind_passkey(&self, cookie: &str, device: &mut SoftAuthenticator) -> StatusCode {
+        let id = BASE64URL_NOPAD.encode(&device.credential_id);
+        let (s, _, options) = self
+            .call(
+                "POST",
+                "/api/passkeys/bind/start",
+                Some(json!({ "credential_id": id })),
+                Some(cookie),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{options}");
+        let salt = prf_salt(&options).expect("le lien demande un sel PRF");
+        let response = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+        let (s, _, _) = self
+            .call(
+                "POST",
+                "/api/passkeys/bind/finish",
+                Some(json!({ "passphrase": PASSPHRASE, "response": response, "prf_output": device.prf_b64(&salt) })),
+                Some(cookie),
+            )
+            .await;
+        s
+    }
+
+    /// Active le mode lié ; renvoie les nouveaux codes de récupération.
+    async fn enable_binding(&self, cookie: &str) -> Vec<String> {
+        let (s, _, body) = self
+            .call(
+                "POST",
+                "/api/security/hardware-binding",
+                Some(json!({ "passphrase": PASSPHRASE, "enabled": true })),
+                Some(cookie),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{body}");
+        assert_eq!(body["hardware_bound"], true);
+        body["recovery_codes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c.as_str().unwrap().to_owned())
+            .collect()
+    }
+}
+
+use data_encoding::BASE64URL_NOPAD;
+
+fn prf_salt(options: &Value) -> Option<Vec<u8>> {
+    options["extensions"]["prf"]["eval"]["first"]
+        .as_str()
+        .map(|s| BASE64URL_NOPAD.decode(s.as_bytes()).unwrap())
 }
 
 #[tokio::test]
@@ -674,4 +732,267 @@ async fn expired_passkey_challenge_is_purged() {
         )
         .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+// --- Mode lié au matériel (extension PRF) -----------------------------------------------
+
+#[tokio::test]
+async fn hardware_binding_end_to_end() {
+    let h = Harness::new();
+    let (totp, old_codes) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+
+    // Impossible d'activer le mode lié sans clé liée.
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/security/hardware-binding",
+            Some(json!({ "passphrase": PASSPHRASE, "enabled": true })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    assert_eq!(h.bind_passkey(&cookie, &mut device).await, StatusCode::OK);
+    let (_, _, list) = h.call("GET", "/api/passkeys", None, Some(&cookie)).await;
+    assert_eq!(list[0]["bound"], true);
+
+    let codes = h.enable_binding(&cookie).await;
+    assert_eq!(codes.len(), 10);
+    let (_, _, status) = h.call("GET", "/api/security", None, Some(&cookie)).await;
+    assert_eq!(status["hardware_bound"], true);
+    assert_eq!(status["require_passkey"], true);
+    assert_eq!(status["bound_passkeys"], 1);
+    assert_eq!(status["recovery_codes_remaining"], 10);
+
+    // La politique ne peut plus être assouplie tant que le coffre est lié.
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            "/api/security/policy",
+            Some(json!({ "require_passkey": false })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    // La phrase de passe seule (même avec le TOTP) n'ouvre plus le coffre.
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "code": totp.code_at(state::now() + 30) })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(!h.state.is_unlocked());
+
+    // Les anciens codes de récupération ont été révoqués.
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "recovery_code": old_codes[0] })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+
+    // La clé liée ouvre le coffre.
+    let (s, headers) = h.passkey_login(&mut device).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let cookie = cookie_from(&headers);
+    let (s, _, _) = h.call("GET", "/api/patients", None, Some(&cookie)).await;
+    assert_eq!(s, StatusCode::OK);
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    // Un nouveau code de récupération fonctionne, une seule fois.
+    let login_with = |code: String| {
+        let h = &h;
+        async move {
+            h.call(
+                "POST",
+                "/api/login",
+                Some(json!({ "passphrase": PASSPHRASE, "recovery_code": code })),
+                None,
+            )
+            .await
+            .0
+        }
+    };
+    assert_eq!(login_with(codes[0].clone()).await, StatusCode::NO_CONTENT);
+    h.state.auto_lock(state::now() + 10 * 3600);
+    assert!(!h.state.is_unlocked());
+    assert_eq!(login_with(codes[0].clone()).await, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn bound_vault_rejects_wrong_prf_and_missing_prf() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+    assert_eq!(h.bind_passkey(&cookie, &mut device).await, StatusCode::OK);
+    h.enable_binding(&cookie).await;
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    let start = || async {
+        let (s, _, options) = h
+            .call(
+                "POST",
+                "/api/login/passkey/start",
+                Some(json!({ "passphrase": PASSPHRASE })),
+                None,
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK);
+        options
+    };
+
+    // Appareil sans PRF : refus explicite.
+    let options = start().await;
+    let response = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login/passkey/finish",
+            Some(json!({ "response": response })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // Sortie PRF d'un autre appareil (ou falsifiée) : refus.
+    let options = start().await;
+    let response = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+    let other = SoftAuthenticator::new(Algorithm::Es256);
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login/passkey/finish",
+            Some(json!({ "response": response, "prf_output": other.prf_b64(&prf_salt(&options).unwrap()) })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert!(!h.state.is_unlocked());
+
+    // Mauvaise phrase de passe : rien n'est révélé au démarrage (pas d'oracle sans
+    // l'appareil), mais même le bon appareil ne peut pas ouvrir le coffre.
+    let (s, _, options) = h
+        .call(
+            "POST",
+            "/api/login/passkey/start",
+            Some(json!({ "passphrase": "mauvaise phrase de passe" })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let response = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login/passkey/finish",
+            Some(json!({ "response": response, "prf_output": device.prf_b64(&prf_salt(&options).unwrap()) })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert!(!h.state.is_unlocked());
+}
+
+#[tokio::test]
+async fn last_bound_key_cannot_be_removed_and_binding_can_be_disabled() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+    assert_eq!(h.bind_passkey(&cookie, &mut device).await, StatusCode::OK);
+    let mut second = h.register_passkey(&cookie, Algorithm::Ed25519).await;
+    assert_eq!(h.bind_passkey(&cookie, &mut second).await, StatusCode::OK);
+    h.enable_binding(&cookie).await;
+
+    let id = BASE64URL_NOPAD.encode(&device.credential_id);
+    let id2 = BASE64URL_NOPAD.encode(&second.credential_id);
+    let (s, _, _) = h
+        .call(
+            "DELETE",
+            &format!("/api/passkeys/{id}"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _, _) = h
+        .call(
+            "DELETE",
+            &format!("/api/passkeys/{id2}"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "dernière clé liée");
+
+    // La clé retirée n'ouvre plus le coffre.
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+    let (s, _) = h.passkey_login(&mut device).await;
+    assert_ne!(s, StatusCode::NO_CONTENT);
+    let (s, headers) = h.passkey_login(&mut second).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let cookie = cookie_from(&headers);
+
+    // Désactivation : la phrase de passe redevient suffisante (avec le second facteur).
+    let (s, _, body) = h
+        .call(
+            "POST",
+            "/api/security/hardware-binding",
+            Some(json!({ "passphrase": PASSPHRASE, "enabled": false })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            "/api/security/policy",
+            Some(json!({ "require_passkey": false })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+    h.login_at(&totp, state::now() + 30).await;
+}
+
+#[tokio::test]
+async fn binding_requires_the_passphrase() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+    let id = BASE64URL_NOPAD.encode(&device.credential_id);
+    let (_, _, options) = h
+        .call(
+            "POST",
+            "/api/passkeys/bind/start",
+            Some(json!({ "credential_id": id })),
+            Some(&cookie),
+        )
+        .await;
+    let salt = prf_salt(&options).unwrap();
+    let response = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/passkeys/bind/finish",
+            Some(json!({ "passphrase": "mauvaise phrase de passe", "response": response, "prf_output": device.prf_b64(&salt) })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let (_, _, list) = h.call("GET", "/api/passkeys", None, Some(&cookie)).await;
+    assert_eq!(list[0]["bound"], false);
 }

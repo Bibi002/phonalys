@@ -24,6 +24,10 @@ pub enum AuditAction {
     PasskeyLogin,
     PasskeyRegistered,
     PasskeyRemoved,
+    /// Une clé a été liée cryptographiquement au coffre (extension PRF).
+    FactorBound,
+    /// Le mode lié au matériel a été activé ou désactivé.
+    HardwareBindingChanged,
     SecurityPolicyChanged,
     PasswordChanged,
     Unlock,

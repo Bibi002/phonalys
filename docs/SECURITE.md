@@ -46,7 +46,8 @@ On parle souvent de « chiffrement de niveau militaire » : concrètement, ce so
 | Second facteur | TOTP (RFC 6238) dont le secret est scellé *dans* le coffre. Un code ne peut pas être rejoué, et la fenêtre de tolérance est de ±30 s. |
 | **Biométrie / clé de sécurité** | WebAuthn/FIDO2 avec **vérification de l'utilisateur obligatoire** : Windows Hello, Touch ID, Face ID, empreinte Android, YubiKey Bio. Les signatures ES256 et Ed25519 sont acceptées. L'origine et le RP ID sont vérifiés, ce qui rend la méthode résistante à l'hameçonnage. Les défis sont à usage unique et valables 2 min. Un authentificateur cloné est détecté par son compteur de signatures. |
 | Politique « clé obligatoire » | Le TOTP est alors refusé. Les codes de récupération restent valables en cas de perte de l'appareil. La dernière clé ne peut pas être retirée tant que la politique est active. |
-| Récupération | 10 codes à usage unique de 80 bits. Seules leurs empreintes sont conservées. |
+| **Mode lié au matériel** (option) | Grâce à l'extension **PRF** de WebAuthn, la clé du coffre dépend à la fois de la phrase de passe **et** d'un secret qui ne quitte jamais l'authentificateur. Chaque clé liée garde une double enveloppe : `chiffrement(clé de la phrase de passe, chiffrement(HKDF(sortie PRF), clé maîtresse))`. L'enveloppe « phrase de passe seule » est supprimée : voler le fichier du coffre **et** la phrase de passe ne suffit plus. À l'activation, de nouveaux codes de récupération sont générés et les anciens sont révoqués. La dernière clé liée ne peut pas être retirée. |
+| Récupération | 10 codes à usage unique de 80 bits. En mode lié, chaque code est lui-même une enveloppe cryptographique de la clé du coffre, détruite après usage. |
 | Échecs | Délai exponentiel à partir du 4e échec, plafonné à 15 min. Un second facteur faux compte comme un échec. Les essais sont traités un par un. |
 | Sessions | Jeton de 256 bits, dont seule l'empreinte reste en mémoire. Cookie `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`. Expiration après 5 min d'inactivité ou 8 h au total. |
 | Verrouillage | Sans session active, les clés sont effacées de la mémoire. `/api/lock` verrouille immédiatement tous les appareils. |
@@ -63,7 +64,10 @@ Ce drapeau signifie « vérifié par biométrie **ou** par le code PIN de l'appa
 
 ### Limites, à connaître honnêtement
 
-- **Le second facteur (TOTP ou biométrie) est un contrôle d'accès, pas encore un facteur cryptographique.** Quelqu'un qui volerait *le fichier du coffre* **et** la phrase de passe pourrait le déchiffrer hors ligne. La parade, prochaine étape, est l'**extension PRF de WebAuthn** : la clé du coffre dépendra alors aussi de l'authentificateur physique, et le vol du fichier et de la phrase de passe ne suffira plus.
+- **Hors mode lié, le second facteur (TOTP ou biométrie) reste un contrôle d'accès, pas un facteur cryptographique.** Quelqu'un qui volerait *le fichier du coffre* **et** la phrase de passe pourrait le déchiffrer hors ligne. Le **mode lié au matériel** supprime ce risque ; il est fortement recommandé dès qu'au moins deux clés compatibles PRF sont enregistrées.
+- **Mode lié : la perte de toutes les clés liées et de tous les codes de récupération rend le coffre définitivement illisible.** Personne, pas même l'éditeur, ne peut le rouvrir. Il faut lier au moins deux clés (par exemple Windows Hello et une YubiKey rangée à part) et conserver les codes imprimés hors ligne.
+- L'extension PRF n'existe pas partout : elle fonctionne avec Windows Hello (Windows 11 récent), les passkeys iCloud (iOS/macOS 18+), Android avec Google Password Manager et les YubiKey 5 / Bio (hmac-secret). Un appareil sans PRF peut toujours servir de clé de connexion, mais pas de clé liée.
+- Une sortie PRF reste en mémoire du serveur le temps d'une connexion, puis elle est effacée (`zeroize`).
 - Le délai après échecs ne freine que les essais *via l'application*. Hors ligne, c'est Argon2id (256 MiB par essai) qui protège, d'où l'exigence d'une phrase de passe forte.
 
 ### Recommandations

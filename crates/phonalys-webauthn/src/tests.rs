@@ -212,9 +212,27 @@ fn options_require_user_verification() {
         "required"
     );
     assert_eq!(reg["excludeCredentials"][0]["id"], creds[0].id.as_str());
-    let auth = authentication_options(&rp(), &c, &creds);
+    let ids: Vec<String> = creds.iter().map(|c| c.id.clone()).collect();
+    let auth = authentication_options(&rp(), &c, &ids, None);
     assert_eq!(auth["userVerification"], "required");
     assert_eq!(auth["rpId"], RP_ID);
+    assert!(auth.get("extensions").is_none());
+    let with_prf = authentication_options(&rp(), &c, &ids, Some(&[7u8; 32]));
+    assert_eq!(
+        with_prf["extensions"]["prf"]["eval"]["first"],
+        URL_SAFE_NO_PAD.encode([7u8; 32])
+    );
+}
+
+#[test]
+fn prf_output_is_per_device_and_per_salt() {
+    let a = SoftAuthenticator::new(Algorithm::Es256);
+    let b = SoftAuthenticator::new(Algorithm::Es256);
+    assert_eq!(a.prf(&[1; 32]), a.prf(&[1; 32]));
+    assert_ne!(a.prf(&[1; 32]), a.prf(&[2; 32]));
+    assert_ne!(a.prf(&[1; 32]), b.prf(&[1; 32]));
+    assert_eq!(decode_prf_output(&a.prf_b64(&[1; 32])).unwrap().len(), 32);
+    assert!(decode_prf_output("AAAA").is_err());
 }
 
 #[test]

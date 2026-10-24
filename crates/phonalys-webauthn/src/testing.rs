@@ -29,6 +29,8 @@ pub struct SoftAuthenticator {
     pub counter: u32,
     /// Simule un appareil sans biométrie ni PIN.
     pub user_verified: bool,
+    /// Secret interne de l'extension PRF (hmac-secret), qui ne quitte jamais l'appareil.
+    prf_secret: [u8; 32],
 }
 
 fn int(i: i64) -> Value {
@@ -60,12 +62,28 @@ impl SoftAuthenticator {
         };
         let mut credential_id = vec![0u8; 16];
         OsRng.fill_bytes(&mut credential_id);
+        let mut prf_secret = [0u8; 32];
+        OsRng.fill_bytes(&mut prf_secret);
         Self {
             key,
             credential_id,
             counter: 0,
             user_verified: true,
+            prf_secret,
         }
+    }
+
+    /// Sortie PRF pour un sel : déterministe, propre à l'appareil.
+    pub fn prf(&self, salt: &[u8]) -> Vec<u8> {
+        let mut h = Sha256::new();
+        h.update(b"WebAuthn PRF\0");
+        h.update(self.prf_secret);
+        h.update(salt);
+        h.finalize().to_vec()
+    }
+
+    pub fn prf_b64(&self, salt: &[u8]) -> String {
+        URL_SAFE_NO_PAD.encode(self.prf(salt))
     }
 
     fn cose_key(&self) -> Value {

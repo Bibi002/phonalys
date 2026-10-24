@@ -20,7 +20,6 @@ pub const SESSION_COOKIE: &str = "__Host-phonalys_session";
 const PATIENT: &str = "patient";
 const TOTP_SECRET: &str = "totp";
 const TOTP_LAST_STEP: &str = "totp-last-step";
-const RECOVERY: &str = "recovery-codes";
 
 /// Exécute une tâche coûteuse (Argon2id) hors du fil asynchrone.
 pub(crate) async fn blocking<T: Send + 'static>(
@@ -110,8 +109,11 @@ pub async fn setup(
         )?;
         let totp = Totp::generate();
         vault.put_secret(TOTP_SECRET, totp.secret())?;
-        let (codes, plain_codes) = RecoveryCodes::generate();
-        vault.put_secret(RECOVERY, &serde_json::to_vec(&codes)?)?;
+        // Les codes de récupération sont des clés : chacun (avec la phrase de passe)
+        // ouvre une enveloppe de la clé maîtresse, détruite après usage.
+        let (_, plain_codes) = RecoveryCodes::generate();
+        let pk = vault.password_key(req.passphrase.as_bytes())?;
+        vault.replace_recovery_factors(&pk, &recovery_secrets(&plain_codes))?;
         // Le coffre est refermé : la première connexion prouvera que la 2FA est configurée.
         drop(vault.lock()?);
         inner.setup_token = None;
@@ -138,31 +140,61 @@ pub struct LoginRequest {
     recovery_code: Option<Zeroizing<String>>,
 }
 
-/// Vérifie le second facteur ; renvoie l'action d'audit correspondante si valide.
-fn second_factor(
+/// Secrets des enveloppes de récupération : forme canonique des codes.
+pub(crate) fn recovery_secrets(codes: &[String]) -> Vec<Vec<u8>> {
+    codes
+        .iter()
+        .map(|c| phonalys_auth::recovery::normalize(c).into_bytes())
+        .collect()
+}
+
+/// Vérifie un code TOTP ; renvoie l'action d'audit si valide.
+fn check_totp(
     vault: &UnlockedVault,
-    req: &LoginRequest,
+    code: &str,
     now: u64,
 ) -> Result<Option<AuditAction>, ApiError> {
-    if let Some(code) = &req.code {
-        let secret = vault.get_secret(TOTP_SECRET)?.ok_or(ApiError::Internal)?;
-        let last = vault
-            .get_secret(TOTP_LAST_STEP)?
-            .and_then(|b| <[u8; 8]>::try_from(b.as_slice()).ok())
-            .map(u64::from_be_bytes);
-        if let Some(step) = Totp::from_secret(secret.to_vec()).verify(code, now, last) {
+    let secret = vault.get_secret(TOTP_SECRET)?.ok_or(ApiError::Internal)?;
+    let last = vault
+        .get_secret(TOTP_LAST_STEP)?
+        .and_then(|b| <[u8; 8]>::try_from(b.as_slice()).ok())
+        .map(u64::from_be_bytes);
+    match Totp::from_secret(secret.to_vec()).verify(code, now, last) {
+        Some(step) => {
             vault.put_secret(TOTP_LAST_STEP, &step.to_be_bytes())?;
-            return Ok(Some(AuditAction::Login));
+            Ok(Some(AuditAction::Login))
         }
-    } else if let Some(code) = &req.recovery_code {
-        let stored = vault.get_secret(RECOVERY)?.ok_or(ApiError::Internal)?;
-        let mut codes: RecoveryCodes = serde_json::from_slice(&stored)?;
-        if codes.redeem(code) {
-            vault.put_secret(RECOVERY, &serde_json::to_vec(&codes)?)?;
-            return Ok(Some(AuditAction::RecoveryCodeUsed));
-        }
+        None => Ok(None),
     }
-    Ok(None)
+}
+
+/// Connexion par code de récupération : c'est l'enveloppe cryptographique du code qui
+/// ouvre le coffre (fonctionne aussi en mode lié au matériel). Le code est consommé.
+fn login_with_recovery(
+    state: &AppState,
+    inner: &mut Inner,
+    passphrase: &[u8],
+    code: &str,
+    now: u64,
+) -> Result<Response, ApiError> {
+    let locked = LockedVault::open(&state.config.vault_path)?;
+    let pk = locked.password_key_at(passphrase, now as i64)?;
+    let secret = phonalys_auth::recovery::normalize(code);
+    let fresh = match locked.unlock_with_recovery_at(&pk, secret.as_bytes(), now as i64) {
+        Ok(v) => v,
+        Err((_, e)) => {
+            tracing::warn!(error = %e, "échec de connexion par code de récupération");
+            return Err(e.into());
+        }
+    };
+    let (vault, was_unlocked) = take_vault(inner, Some(fresh))?;
+    conclude_login(
+        inner,
+        vault,
+        was_unlocked,
+        Ok(Some(AuditAction::RecoveryCodeUsed)),
+        now,
+    )
 }
 
 /// Vérifie la phrase de passe (Argon2id) et renvoie une instance fraîche du coffre.
@@ -252,17 +284,19 @@ pub async fn login(
             return Err(ApiError::NotInitialized);
         }
         let now = now();
+        if let Some(code) = &req.recovery_code {
+            return login_with_recovery(&state, &mut inner, req.passphrase.as_bytes(), code, now);
+        }
         let fresh = unlock_with_passphrase(&state, req.passphrase.as_bytes(), now)?;
         let (vault, was_unlocked) = take_vault(&mut inner, Some(fresh))?;
 
-        let outcome = match crate::passkey::policy(&vault) {
-            Ok(policy) if policy.require_passkey && req.code.is_some() => {
-                Err(ApiError::BadRequest(
-                    "clé biométrique exigée : utilisez la connexion par clé de sécurité".into(),
-                ))
-            }
-            Ok(_) => second_factor(&vault, &req, now),
-            Err(e) => Err(e),
+        let outcome = match (crate::passkey::policy(&vault), &req.code) {
+            (Ok(policy), Some(_)) if policy.require_passkey => Err(ApiError::BadRequest(
+                "clé biométrique exigée : utilisez la connexion par clé de sécurité".into(),
+            )),
+            (Ok(_), Some(code)) => check_totp(&vault, code, now),
+            (Ok(_), None) => Ok(None),
+            (Err(e), _) => Err(e),
         };
         conclude_login(&mut inner, vault, was_unlocked, outcome, now)
     })

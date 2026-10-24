@@ -6,7 +6,7 @@ use data_encoding::BASE32_NOPAD;
 use phonalys_auth::{SessionConfig, SessionStore};
 use phonalys_core::audit::AuditAction;
 use phonalys_crypto::KdfParams;
-use phonalys_vault::UnlockedVault;
+use phonalys_vault::{PasswordKey, UnlockedVault};
 use phonalys_webauthn::{Challenge, RelyingParty};
 use rand_core::{OsRng, RngCore};
 use std::path::PathBuf;
@@ -34,11 +34,22 @@ pub(crate) struct PendingLogin {
     pub expires_at: u64,
     /// Instance ouverte par la phrase de passe, si le coffre était verrouillé.
     pub fresh: Option<UnlockedVault>,
+    /// Coffre lié au matériel : clé issue de la phrase de passe, en attente de la
+    /// sortie PRF de l'appareil.
+    pub password_key: Option<PasswordKey>,
 }
 
 #[derive(Debug)]
 pub(crate) struct PendingRegistration {
     pub challenge: Challenge,
+    pub expires_at: u64,
+}
+
+/// Lien cryptographique d'une clé en cours (extension PRF).
+#[derive(Debug)]
+pub(crate) struct PendingBind {
+    pub challenge: Challenge,
+    pub credential_id: String,
     pub expires_at: u64,
 }
 
@@ -63,6 +74,7 @@ pub(crate) struct Inner {
     pub setup_token: Option<String>,
     pub pending_login: Option<PendingLogin>,
     pub pending_registration: Option<PendingRegistration>,
+    pub pending_bind: Option<PendingBind>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +100,7 @@ impl AppState {
                 setup_token: setup_token.clone(),
                 pending_login: None,
                 pending_registration: None,
+                pending_bind: None,
             })),
             config: Arc::new(config),
         };
@@ -127,6 +140,13 @@ impl AppState {
             .is_some_and(|p| now > p.expires_at)
         {
             inner.pending_registration = None;
+        }
+        if inner
+            .pending_bind
+            .as_ref()
+            .is_some_and(|p| now > p.expires_at)
+        {
+            inner.pending_bind = None;
         }
         if !inner.sessions.purge(now) {
             if let Phase::Unlocked(mut vault) = std::mem::replace(&mut inner.phase, Phase::Locked) {

@@ -234,6 +234,19 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.ct_eq(b).into()
 }
 
+/// Dérive une clé de 256 bits d'un secret à haute entropie (sortie PRF d'un
+/// authentificateur, code de récupération…) avec HKDF-SHA256. `info` sépare les usages.
+/// Ne convient pas aux mots de passe : utiliser [`derive_kek`].
+pub fn derive_subkey(ikm: &[u8], info: &[u8]) -> SecretKey {
+    let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(b"phonalys:v1:hkdf"), ikm);
+    let mut out = [0u8; KEY_LEN];
+    // 32 octets ≤ 255 × 32 : l'expansion ne peut pas échouer.
+    if hk.expand(info, &mut out).is_err() {
+        out.zeroize();
+    }
+    SecretKey(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +333,13 @@ mod tests {
         assert!(verify_password(b"correct horse", &phc));
         assert!(!verify_password(b"wrong", &phc));
         assert!(!verify_password(b"correct horse", "pas un hash"));
+    }
+
+    #[test]
+    fn subkeys_are_deterministic_and_separated() {
+        assert_eq!(derive_subkey(b"prf", b"a"), derive_subkey(b"prf", b"a"));
+        assert_ne!(derive_subkey(b"prf", b"a"), derive_subkey(b"prf", b"b"));
+        assert_ne!(derive_subkey(b"prf1", b"a"), derive_subkey(b"prf2", b"a"));
     }
 
     #[test]

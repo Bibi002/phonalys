@@ -108,11 +108,15 @@ pub fn app(state: AppState) -> Router {
             "/api/passkeys/register/finish",
             post(passkey::register_finish),
         )
+        .route("/api/passkeys/bind/start", post(passkey::bind_start))
+        .route("/api/passkeys/bind/finish", post(passkey::bind_finish))
         .route("/api/passkeys/{id}", axum::routing::delete(passkey::remove))
+        .route("/api/security", get(passkey::status))
         .route(
             "/api/security/policy",
             get(passkey::get_policy).put(passkey::put_policy),
         )
+        .route("/api/security/hardware-binding", post(passkey::set_binding))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             api::require_session,

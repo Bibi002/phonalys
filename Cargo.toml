@@ -48,6 +48,7 @@ zeroize = { version = "1.8", features = ["derive", "serde"] }
 subtle = "2.6"
 sha2 = "0.10"
 hmac = "0.12"
+hkdf = "0.12"
 hex = "0.4"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }

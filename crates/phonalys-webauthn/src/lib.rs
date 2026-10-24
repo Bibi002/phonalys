@@ -191,23 +191,42 @@ pub fn registration_options(
         "timeout": 120000,
         "attestation": "none",
         "authenticatorSelection": { "residentKey": "preferred", "userVerification": "required" },
+        // Demande si l'authentificateur sait dériver un secret (PRF / hmac-secret).
+        "extensions": { "prf": {} },
         "excludeCredentials": existing.iter().map(|c| json!({ "type": "public-key", "id": c.id })).collect::<Vec<_>>(),
     })
 }
 
-/// Options à passer à `navigator.credentials.get({ publicKey })`.
+/// Options à passer à `navigator.credentials.get({ publicKey })`. Avec `prf_salt`,
+/// l'authentificateur renvoie aussi un secret dérivé de ce sel (extension PRF), qui
+/// sert à ouvrir un coffre lié au matériel.
 pub fn authentication_options(
     rp: &RelyingParty,
     challenge: &Challenge,
-    credentials: &[StoredCredential],
+    credential_ids: &[String],
+    prf_salt: Option<&[u8; 32]>,
 ) -> Value {
-    json!({
+    let mut options = json!({
         "rpId": rp.id,
         "challenge": challenge.to_base64url(),
         "timeout": 120000,
         "userVerification": "required",
-        "allowCredentials": credentials.iter().map(|c| json!({ "type": "public-key", "id": c.id })).collect::<Vec<_>>(),
-    })
+        "allowCredentials": credential_ids.iter().map(|id| json!({ "type": "public-key", "id": id })).collect::<Vec<_>>(),
+    });
+    if let Some(salt) = prf_salt {
+        options["extensions"] =
+            json!({ "prf": { "eval": { "first": URL_SAFE_NO_PAD.encode(salt) } } });
+    }
+    options
+}
+
+/// Décode la sortie PRF renvoyée par le navigateur (base64url, 32 octets).
+pub fn decode_prf_output(b64url: &str) -> Result<Vec<u8>, WebAuthnError> {
+    let out = b64(b64url)?;
+    if out.len() != 32 {
+        return Err(WebAuthnError::Encoding);
+    }
+    Ok(out)
 }
 
 /// Vérifie une inscription et renvoie la clé à stocker.

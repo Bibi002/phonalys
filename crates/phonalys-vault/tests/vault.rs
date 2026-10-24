@@ -181,8 +181,13 @@ fn audit_persists_across_sessions() {
 fn change_password_keeps_data() {
     let (_dir, path, mut vault) = new_vault();
     vault.put("note", "n1", b"observation").unwrap();
+    assert!(matches!(
+        vault.password_key(b"faux"),
+        Err(VaultError::WrongPassword)
+    ));
+    let old = vault.password_key(PASSWORD).unwrap();
     vault
-        .change_password(b"nouvelle phrase de passe tres longue", params())
+        .change_password(&old, b"nouvelle phrase de passe tres longue", params())
         .unwrap();
     drop(vault);
 
