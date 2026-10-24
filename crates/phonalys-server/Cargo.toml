@@ -12,6 +12,8 @@ phonalys-auth.workspace = true
 phonalys-core.workspace = true
 phonalys-crypto.workspace = true
 phonalys-vault.workspace = true
+phonalys-webauthn.workspace = true
+url.workspace = true
 axum.workspace = true
 axum-server.workspace = true
 rustls.workspace = true
@@ -30,6 +32,7 @@ rand_core.workspace = true
 data-encoding.workspace = true
 
 [dev-dependencies]
+phonalys-webauthn = { workspace = true, features = ["test-authenticator"] }
 tower.workspace = true
 tempfile.workspace = true
 

@@ -2,6 +2,7 @@
 
 mod api;
 mod error;
+mod passkey;
 mod state;
 pub mod tls;
 
@@ -98,6 +99,20 @@ pub fn app(state: AppState) -> Router {
             "/api/patients/{id}",
             get(api::get_patient).delete(api::delete_patient),
         )
+        .route("/api/passkeys", get(passkey::list))
+        .route(
+            "/api/passkeys/register/start",
+            post(passkey::register_start),
+        )
+        .route(
+            "/api/passkeys/register/finish",
+            post(passkey::register_finish),
+        )
+        .route("/api/passkeys/{id}", axum::routing::delete(passkey::remove))
+        .route(
+            "/api/security/policy",
+            get(passkey::get_policy).put(passkey::put_policy),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             api::require_session,
@@ -108,6 +123,8 @@ pub fn app(state: AppState) -> Router {
         .route("/api/status", get(api::status))
         .route("/api/setup", post(api::setup))
         .route("/api/login", post(api::login))
+        .route("/api/login/passkey/start", post(passkey::login_start))
+        .route("/api/login/passkey/finish", post(passkey::login_finish))
         .merge(protected)
         .with_state(state)
         .layer(middleware::from_fn(csrf_guard))

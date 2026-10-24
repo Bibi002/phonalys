@@ -1,7 +1,7 @@
 //! Points d'accès de l'API.
 
 use crate::error::ApiError;
-use crate::state::{now, AppState, Phase, ACTOR};
+use crate::state::{now, AppState, Inner, Phase, ACTOR};
 use axum::extract::{Path, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::Next;
@@ -23,7 +23,7 @@ const TOTP_LAST_STEP: &str = "totp-last-step";
 const RECOVERY: &str = "recovery-codes";
 
 /// Exécute une tâche coûteuse (Argon2id) hors du fil asynchrone.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
 ) -> Result<T, ApiError> {
     tokio::task::spawn_blocking(f)
@@ -165,6 +165,81 @@ fn second_factor(
     Ok(None)
 }
 
+/// Vérifie la phrase de passe (Argon2id) et renvoie une instance fraîche du coffre.
+pub(crate) fn unlock_with_passphrase(
+    state: &AppState,
+    passphrase: &[u8],
+    now: u64,
+) -> Result<UnlockedVault, ApiError> {
+    match LockedVault::open(&state.config.vault_path)?.unlock_at(passphrase, now as i64) {
+        Ok(v) => Ok(v),
+        Err((_, VaultError::WrongPassword)) => {
+            tracing::warn!("échec de connexion : phrase de passe incorrecte");
+            Err(ApiError::Unauthorized)
+        }
+        Err((_, e)) => Err(e.into()),
+    }
+}
+
+/// Instance du coffre à utiliser pour terminer une connexion. Si le coffre est déjà
+/// ouvert (autre appareil), on garde cette instance pour que le journal d'audit en
+/// mémoire reste le seul à écrire.
+pub(crate) fn take_vault(
+    inner: &mut Inner,
+    fresh: Option<UnlockedVault>,
+) -> Result<(UnlockedVault, bool), ApiError> {
+    match (std::mem::replace(&mut inner.phase, Phase::Locked), fresh) {
+        (Phase::Unlocked(existing), _) => Ok((existing, true)),
+        (Phase::Locked, Some(fresh)) => Ok((fresh, false)),
+        (Phase::Locked, None) => Err(ApiError::Unauthorized),
+    }
+}
+
+/// Conclut une tentative de connexion : session et cookie si le second facteur est
+/// valide, échec compté et audité sinon.
+pub(crate) fn conclude_login(
+    inner: &mut Inner,
+    mut vault: UnlockedVault,
+    was_unlocked: bool,
+    outcome: Result<Option<AuditAction>, ApiError>,
+    now: u64,
+) -> Result<Response, ApiError> {
+    let restore = |inner: &mut Inner, vault: UnlockedVault| {
+        if was_unlocked {
+            inner.phase = Phase::Unlocked(vault);
+        }
+    };
+    match outcome {
+        Ok(Some(action)) => {
+            vault.reset_lockout()?;
+            vault.audit(ACTOR, action, None)?;
+            let token = inner.sessions.create(now);
+            inner.phase = Phase::Unlocked(vault);
+            let cookie =
+                format!("{SESSION_COOKIE}={token}; Path=/; Secure; HttpOnly; SameSite=Strict");
+            let mut res = StatusCode::NO_CONTENT.into_response();
+            res.headers_mut().insert(
+                header::SET_COOKIE,
+                HeaderValue::from_str(&cookie).map_err(|_| ApiError::Internal)?,
+            );
+            Ok(res)
+        }
+        Ok(None) => {
+            let failure = vault
+                .register_failure(now as i64)
+                .and_then(|()| vault.audit(ACTOR, AuditAction::LoginFailed, None));
+            restore(inner, vault);
+            failure?;
+            tracing::warn!("échec de connexion : second facteur invalide");
+            Err(ApiError::Unauthorized)
+        }
+        Err(e) => {
+            restore(inner, vault);
+            Err(e)
+        }
+    }
+}
+
 pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
@@ -177,55 +252,19 @@ pub async fn login(
             return Err(ApiError::NotInitialized);
         }
         let now = now();
-        let fresh = match LockedVault::open(&state.config.vault_path)?
-            .unlock_at(req.passphrase.as_bytes(), now as i64)
-        {
-            Ok(v) => v,
-            Err((_, VaultError::WrongPassword)) => {
-                tracing::warn!("échec de connexion : phrase de passe incorrecte");
-                return Err(ApiError::Unauthorized);
-            }
-            Err((_, e)) => return Err(e.into()),
-        };
+        let fresh = unlock_with_passphrase(&state, req.passphrase.as_bytes(), now)?;
+        let (vault, was_unlocked) = take_vault(&mut inner, Some(fresh))?;
 
-        // Si le coffre est déjà ouvert (autre appareil), on garde cette instance pour
-        // que le journal d'audit en mémoire reste le seul à écrire.
-        let (mut vault, was_unlocked) = match std::mem::replace(&mut inner.phase, Phase::Locked) {
-            Phase::Unlocked(existing) => (existing, true),
-            Phase::Locked => (fresh, false),
+        let outcome = match crate::passkey::policy(&vault) {
+            Ok(policy) if policy.require_passkey && req.code.is_some() => {
+                Err(ApiError::BadRequest(
+                    "clé biométrique exigée : utilisez la connexion par clé de sécurité".into(),
+                ))
+            }
+            Ok(_) => second_factor(&vault, &req, now),
+            Err(e) => Err(e),
         };
-
-        match second_factor(&vault, &req, now) {
-            Ok(Some(action)) => {
-                vault.reset_lockout()?;
-                vault.audit(ACTOR, action, None)?;
-                let token = inner.sessions.create(now);
-                inner.phase = Phase::Unlocked(vault);
-                let cookie =
-                    format!("{SESSION_COOKIE}={token}; Path=/; Secure; HttpOnly; SameSite=Strict");
-                let mut res = StatusCode::NO_CONTENT.into_response();
-                res.headers_mut().insert(
-                    header::SET_COOKIE,
-                    HeaderValue::from_str(&cookie).map_err(|_| ApiError::Internal)?,
-                );
-                Ok(res)
-            }
-            Ok(None) => {
-                vault.register_failure(now as i64)?;
-                vault.audit(ACTOR, AuditAction::LoginFailed, None)?;
-                if was_unlocked {
-                    inner.phase = Phase::Unlocked(vault);
-                }
-                tracing::warn!("échec de connexion : second facteur invalide");
-                Err(ApiError::Unauthorized)
-            }
-            Err(e) => {
-                if was_unlocked {
-                    inner.phase = Phase::Unlocked(vault);
-                }
-                Err(e)
-            }
-        }
+        conclude_login(&mut inner, vault, was_unlocked, outcome, now)
     })
     .await
 }

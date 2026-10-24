@@ -10,6 +10,8 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 const PASSPHRASE: &str = "girafe tambour lumière escalier";
+const RP_ID: &str = "localhost";
+const ORIGIN: &str = "https://localhost:8443";
 
 struct Harness {
     _dir: tempfile::TempDir,
@@ -24,6 +26,11 @@ impl Harness {
             vault_path: dir.path().join("cabinet.phonalys-vault"),
             kdf: KdfParams::insecure_for_tests(),
             sessions: SessionConfig::default(),
+            relying_party: phonalys_webauthn::RelyingParty {
+                id: RP_ID.into(),
+                name: "Phonalys".into(),
+                origins: vec![ORIGIN.into()],
+            },
         });
         Self {
             _dir: dir,
@@ -398,4 +405,273 @@ async fn auto_lock_after_idle_timeout() {
     h.state
         .auto_lock(state::now() + SessionConfig::default().idle_timeout_secs + 1);
     assert!(!h.state.is_unlocked());
+}
+
+// --- Clés biométriques (WebAuthn) ------------------------------------------------------
+
+use phonalys_webauthn::testing::{Algorithm, SoftAuthenticator};
+
+impl Harness {
+    /// Inscrit une clé simulée pendant une session ouverte.
+    async fn register_passkey(&self, cookie: &str, alg: Algorithm) -> SoftAuthenticator {
+        let device = SoftAuthenticator::new(alg);
+        let (s, _, options) = self
+            .call("POST", "/api/passkeys/register/start", None, Some(cookie))
+            .await;
+        assert_eq!(s, StatusCode::OK, "{options}");
+        assert_eq!(
+            options["authenticatorSelection"]["userVerification"],
+            "required"
+        );
+        let response = device.register(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+        let (s, _, body) = self
+            .call(
+                "POST",
+                "/api/passkeys/register/finish",
+                Some(json!({ "response": response, "label": "Windows Hello" })),
+                Some(cookie),
+            )
+            .await;
+        assert_eq!(s, StatusCode::CREATED, "{body}");
+        device
+    }
+
+    /// Connexion complète par phrase de passe + clé biométrique.
+    async fn passkey_login(&self, device: &mut SoftAuthenticator) -> (StatusCode, HeaderMap) {
+        let (s, _, options) = self
+            .call(
+                "POST",
+                "/api/login/passkey/start",
+                Some(json!({ "passphrase": PASSPHRASE })),
+                None,
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{options}");
+        let response = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+        let (s, headers, _) = self
+            .call(
+                "POST",
+                "/api/login/passkey/finish",
+                Some(json!({ "response": response })),
+                None,
+            )
+            .await;
+        (s, headers)
+    }
+}
+
+#[tokio::test]
+async fn passkey_registration_requires_session() {
+    let h = Harness::new();
+    h.setup().await;
+    let (s, _, _) = h
+        .call("POST", "/api/passkeys/register/start", None, None)
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn biometric_login_end_to_end() {
+    for alg in [Algorithm::Es256, Algorithm::Ed25519] {
+        let h = Harness::new();
+        let (totp, _) = h.setup().await;
+        let cookie = h.login(&totp).await;
+        let mut device = h.register_passkey(&cookie, alg).await;
+        let (_, _, list) = h.call("GET", "/api/passkeys", None, Some(&cookie)).await;
+        assert_eq!(list[0]["label"], "Windows Hello");
+
+        h.call("POST", "/api/lock", None, Some(&cookie)).await;
+        assert!(!h.state.is_unlocked());
+
+        let (s, headers) = h.passkey_login(&mut device).await;
+        assert_eq!(s, StatusCode::NO_CONTENT, "{alg:?}");
+        let cookie = cookie_from(&headers);
+        let (s, _, _) = h.call("GET", "/api/patients", None, Some(&cookie)).await;
+        assert_eq!(s, StatusCode::OK);
+    }
+}
+
+#[tokio::test]
+async fn passkey_login_needs_the_passphrase_too() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    h.register_passkey(&cookie, Algorithm::Es256).await;
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login/passkey/start",
+            Some(json!({ "passphrase": "mauvaise phrase de passe" })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // Sans défi en cours, une signature seule ne sert à rien.
+    let mut device = SoftAuthenticator::new(Algorithm::Es256);
+    let forged = device.authenticate(RP_ID, ORIGIN, "AAAA");
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login/passkey/finish",
+            Some(json!({ "response": forged })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert!(!h.state.is_unlocked());
+}
+
+#[tokio::test]
+async fn device_without_biometrics_is_refused_and_counted() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    device.user_verified = false;
+    let (s, _) = h.passkey_login(&mut device).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert!(!h.state.is_unlocked());
+
+    // Avec la biométrie, une nouvelle tentative (nouveau défi) réussit.
+    device.user_verified = true;
+    let (s, headers) = h.passkey_login(&mut device).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let cookie = cookie_from(&headers);
+    let (_, _, list) = h.call("GET", "/api/passkeys", None, Some(&cookie)).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn phishing_site_signature_is_refused() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    let (_, _, options) = h
+        .call(
+            "POST",
+            "/api/login/passkey/start",
+            Some(json!({ "passphrase": PASSPHRASE })),
+            None,
+        )
+        .await;
+    let response = device.authenticate(
+        RP_ID,
+        "https://phonalys-connexion.example",
+        options["challenge"].as_str().unwrap(),
+    );
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login/passkey/finish",
+            Some(json!({ "response": response })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn mandatory_passkey_policy() {
+    let h = Harness::new();
+    let (totp, codes) = h.setup().await;
+    let cookie = h.login(&totp).await;
+
+    // Impossible d'exiger une clé tant qu'aucune n'est enregistrée.
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            "/api/security/policy",
+            Some(json!({ "require_passkey": true })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+    let (s, _, policy) = h
+        .call(
+            "PUT",
+            "/api/security/policy",
+            Some(json!({ "require_passkey": true })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(policy["require_passkey"], true);
+
+    // La dernière clé obligatoire ne peut pas être retirée.
+    let (_, _, list) = h.call("GET", "/api/passkeys", None, Some(&cookie)).await;
+    let id = list[0]["id"].as_str().unwrap().to_owned();
+    let (s, _, _) = h
+        .call(
+            "DELETE",
+            &format!("/api/passkeys/{id}"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    // Le TOTP n'est plus accepté…
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "code": totp.code_at(state::now() + 30) })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // …la clé biométrique, si…
+    let (s, _) = h.passkey_login(&mut device).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    // …et les codes de récupération aussi, en cas de perte de l'appareil.
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "recovery_code": codes[0] })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn expired_passkey_challenge_is_purged() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+
+    let (_, _, options) = h
+        .call(
+            "POST",
+            "/api/login/passkey/start",
+            Some(json!({ "passphrase": PASSPHRASE })),
+            None,
+        )
+        .await;
+    h.state
+        .auto_lock(state::now() + state::CHALLENGE_TTL_SECS + 1);
+    let response = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login/passkey/finish",
+            Some(json!({ "response": response })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
 }

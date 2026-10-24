@@ -44,6 +44,8 @@ On parle souvent de « chiffrement de niveau militaire » : concrètement, ce so
 | Installation | Jeton à usage unique affiché sur la console du serveur. Sans lui, personne sur le réseau ne peut s'approprier une installation vierge. |
 | Phrase de passe | Au moins 14 caractères et un score zxcvbn de 4/4 (dictionnaires, claviers, dates). Le nom du praticien est refusé. Elle n'est **jamais stockée**, même hachée : elle sert uniquement à dériver la clé du coffre. |
 | Second facteur | TOTP (RFC 6238) dont le secret est scellé *dans* le coffre. Un code ne peut pas être rejoué, et la fenêtre de tolérance est de ±30 s. |
+| **Biométrie / clé de sécurité** | WebAuthn/FIDO2 avec **vérification de l'utilisateur obligatoire** : Windows Hello, Touch ID, Face ID, empreinte Android, YubiKey Bio. Les signatures ES256 et Ed25519 sont acceptées. L'origine et le RP ID sont vérifiés, ce qui rend la méthode résistante à l'hameçonnage. Les défis sont à usage unique et valables 2 min. Un authentificateur cloné est détecté par son compteur de signatures. |
+| Politique « clé obligatoire » | Le TOTP est alors refusé. Les codes de récupération restent valables en cas de perte de l'appareil. La dernière clé ne peut pas être retirée tant que la politique est active. |
 | Récupération | 10 codes à usage unique de 80 bits. Seules leurs empreintes sont conservées. |
 | Échecs | Délai exponentiel à partir du 4e échec, plafonné à 15 min. Un second facteur faux compte comme un échec. Les essais sont traités un par un. |
 | Sessions | Jeton de 256 bits, dont seule l'empreinte reste en mémoire. Cookie `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`. Expiration après 5 min d'inactivité ou 8 h au total. |
@@ -51,9 +53,17 @@ On parle souvent de « chiffrement de niveau militaire » : concrètement, ce so
 | CSRF | Les requêtes qui modifient l'état exigent un en-tête dédié et une origine identique à celle du serveur. |
 | TLS | TLS 1.3 uniquement. Certificat auto-signé dont l'empreinte SHA-256 est à épingler. |
 
+### Biométrie et RGPD
+
+L'empreinte ou le visage sont vérifiés **par l'appareil lui-même**. Phonalys ne reçoit qu'une signature cryptographique et le drapeau « utilisateur vérifié ». **Aucune donnée biométrique n'est transmise ni stockée.** On évite ainsi un traitement de données biométriques au sens de l'article 9 du RGPD.
+
+Ce drapeau signifie « vérifié par biométrie **ou** par le code PIN de l'appareil » : le protocole ne permet pas de distinguer les deux. Pour imposer une biométrie stricte, il faudra restreindre les modèles acceptés (AAGUID), par exemple à une YubiKey Bio. C'est une option prévue.
+
+**Contrainte technique :** WebAuthn exige un nom de domaine (pas une adresse IP) et un certificat reconnu par l'appareil. Sur le réseau local, il faut donc un nom comme `phonalys.lan` et l'installation de l'autorité de certification Phonalys sur chaque appareil. Ce sera géré par l'appairage en phase 3. `localhost` fonctionne directement.
+
 ### Limites, à connaître honnêtement
 
-- **TOTP est un contrôle d'accès, pas un facteur cryptographique.** Quelqu'un qui volerait *le fichier du coffre* **et** la phrase de passe pourrait le déchiffrer hors ligne, sans le code TOTP. La parade prévue est **FIDO2 avec l'extension PRF** : la clé du coffre dépendra alors aussi de la clé physique, et le vol du fichier et de la phrase de passe ne suffira plus.
+- **Le second facteur (TOTP ou biométrie) est un contrôle d'accès, pas encore un facteur cryptographique.** Quelqu'un qui volerait *le fichier du coffre* **et** la phrase de passe pourrait le déchiffrer hors ligne. La parade, prochaine étape, est l'**extension PRF de WebAuthn** : la clé du coffre dépendra alors aussi de l'authentificateur physique, et le vol du fichier et de la phrase de passe ne suffira plus.
 - Le délai après échecs ne freine que les essais *via l'application*. Hors ligne, c'est Argon2id (256 MiB par essai) qui protège, d'où l'exigence d'une phrase de passe forte.
 
 ### Recommandations

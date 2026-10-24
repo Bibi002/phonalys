@@ -7,6 +7,7 @@ use phonalys_auth::{SessionConfig, SessionStore};
 use phonalys_core::audit::AuditAction;
 use phonalys_crypto::KdfParams;
 use phonalys_vault::UnlockedVault;
+use phonalys_webauthn::{Challenge, RelyingParty};
 use rand_core::{OsRng, RngCore};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -18,6 +19,34 @@ pub struct Config {
     pub vault_path: PathBuf,
     pub kdf: KdfParams,
     pub sessions: SessionConfig,
+    /// Identité WebAuthn du serveur (domaine et origines autorisées).
+    pub relying_party: RelyingParty,
+}
+
+/// Durée de validité d'un défi WebAuthn, en secondes.
+pub const CHALLENGE_TTL_SECS: u64 = 120;
+
+/// Connexion par clé en cours : la phrase de passe a été vérifiée, la signature
+/// biométrique est attendue.
+#[derive(Debug)]
+pub(crate) struct PendingLogin {
+    pub challenge: Challenge,
+    pub expires_at: u64,
+    /// Instance ouverte par la phrase de passe, si le coffre était verrouillé.
+    pub fresh: Option<UnlockedVault>,
+}
+
+#[derive(Debug)]
+pub(crate) struct PendingRegistration {
+    pub challenge: Challenge,
+    pub expires_at: u64,
+}
+
+/// Nouveau défi aléatoire.
+pub(crate) fn new_challenge() -> Challenge {
+    let mut raw = [0u8; 32];
+    OsRng.fill_bytes(&mut raw);
+    Challenge::from_random(raw)
 }
 
 #[derive(Debug)]
@@ -32,6 +61,8 @@ pub(crate) struct Inner {
     pub sessions: SessionStore,
     /// Présent tant que l'installation n'est pas faite.
     pub setup_token: Option<String>,
+    pub pending_login: Option<PendingLogin>,
+    pub pending_registration: Option<PendingRegistration>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +86,8 @@ impl AppState {
                 phase: Phase::Locked,
                 sessions: SessionStore::new(config.sessions),
                 setup_token: setup_token.clone(),
+                pending_login: None,
+                pending_registration: None,
             })),
             config: Arc::new(config),
         };
@@ -80,6 +113,21 @@ impl AppState {
     /// Verrouille si plus aucune session n'est active.
     pub fn auto_lock(&self, now: u64) {
         let mut inner = self.lock_inner();
+        // Une connexion par clé abandonnée ne doit pas garder de clés en mémoire.
+        if inner
+            .pending_login
+            .as_ref()
+            .is_some_and(|p| now > p.expires_at)
+        {
+            inner.pending_login = None;
+        }
+        if inner
+            .pending_registration
+            .as_ref()
+            .is_some_and(|p| now > p.expires_at)
+        {
+            inner.pending_registration = None;
+        }
         if !inner.sessions.purge(now) {
             if let Phase::Unlocked(mut vault) = std::mem::replace(&mut inner.phase, Phase::Locked) {
                 if let Err(e) = vault.audit(ACTOR, AuditAction::AutoLock, None) {

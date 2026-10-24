@@ -1,0 +1,32 @@
+[package]
+name = "phonalys-webauthn"
+description = "Vérification WebAuthn / FIDO2 (passkeys, biométrie locale) pour Phonalys, sans OpenSSL."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Authentificateur logiciel simulé, réservé aux tests (jamais en production).
+test-authenticator = ["dep:rand_core"]
+
+[dependencies]
+base64.workspace = true
+ciborium.workspace = true
+ed25519-dalek.workspace = true
+p256.workspace = true
+phonalys-crypto.workspace = true
+rand_core = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+rand_core.workspace = true
+# Active l'authentificateur simulé pour les tests de cette crate.
+phonalys-webauthn = { path = ".", features = ["test-authenticator"] }
+
+[lints]
+workspace = true

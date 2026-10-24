@@ -1,6 +1,7 @@
 use phonalys_auth::SessionConfig;
 use phonalys_crypto::KdfParams;
 use phonalys_server::{app, spawn_auto_lock, tls, AppState, Config};
+use phonalys_webauthn::RelyingParty;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
@@ -19,6 +20,26 @@ fn default_data_dir() -> PathBuf {
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
     };
     base.map_or_else(|| PathBuf::from("phonalys-data"), |b| b.join("Phonalys"))
+}
+
+/// Identité WebAuthn. `PHONALYS_PUBLIC_ORIGIN` donne l'adresse exacte à laquelle les
+/// appareils joignent le serveur, par exemple `https://phonalys.lan:8443`.
+/// WebAuthn exige un nom de domaine (pas une adresse IP) ; `localhost` est accepté.
+fn relying_party(bind: SocketAddr, insecure_http: bool) -> Result<RelyingParty, tls::BoxError> {
+    let scheme = if insecure_http { "http" } else { "https" };
+    let origin = std::env::var("PHONALYS_PUBLIC_ORIGIN")
+        .unwrap_or_else(|_| format!("{scheme}://localhost:{}", bind.port()));
+    let url = url::Url::parse(&origin)?;
+    let Some(url::Host::Domain(domain)) = url.host() else {
+        return Err(
+            "PHONALYS_PUBLIC_ORIGIN doit utiliser un nom de domaine, pas une adresse IP".into(),
+        );
+    };
+    Ok(RelyingParty {
+        id: domain.to_owned(),
+        name: "Phonalys".into(),
+        origins: vec![origin.trim_end_matches('/').to_owned()],
+    })
 }
 
 fn create_private_dir(dir: &PathBuf) -> std::io::Result<()> {
@@ -46,10 +67,15 @@ async fn main() -> Result<(), tls::BoxError> {
         std::env::var_os("PHONALYS_DATA_DIR").map_or_else(default_data_dir, PathBuf::from);
     create_private_dir(&data_dir)?;
 
+    let insecure_http = std::env::var("PHONALYS_INSECURE_HTTP").as_deref() == Ok("1");
+    let relying_party = relying_party(bind, insecure_http)?;
+    tracing::info!(rp_id = %relying_party.id, origins = ?relying_party.origins, "identité WebAuthn");
+
     let (state, setup_token) = AppState::new(Config {
         vault_path: data_dir.join("cabinet.phonalys-vault"),
         kdf: KdfParams::default(),
         sessions: SessionConfig::default(),
+        relying_party,
     });
     if let Some(token) = setup_token {
         // Écrit sur la console uniquement, jamais dans les journaux persistants.
@@ -58,7 +84,7 @@ async fn main() -> Result<(), tls::BoxError> {
     spawn_auto_lock(state.clone());
     let router = app(state);
 
-    if std::env::var("PHONALYS_INSECURE_HTTP").as_deref() == Ok("1") {
+    if insecure_http {
         if !bind.ip().is_loopback() {
             return Err("PHONALYS_INSECURE_HTTP n'est autorisé que sur 127.0.0.1 / ::1".into());
         }

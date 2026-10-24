@@ -19,7 +19,9 @@
 - [x] Sessions : jeton de 256 bits haché, inactivité 5 min, durée maximale 8 h, verrouillage automatique
 - [x] Serveur : jeton d'installation à usage unique, cookie `__Host-`, protection CSRF (en-tête et origine)
 - [x] TLS 1.3 uniquement (rustls), certificat auto-signé, empreinte affichée
-- [ ] **WebAuthn / FIDO2** (clé matérielle) avec l'extension PRF, pour lier la clé du coffre au jeton physique
+- [x] **WebAuthn / FIDO2 biométrique** : vérification de l'utilisateur obligatoire, ES256 et Ed25519, détection des clones, politique « clé obligatoire »
+- [ ] Extension **PRF** : lier cryptographiquement la clé du coffre à l'authentificateur
+- [ ] Option « biométrie stricte » : liste blanche d'AAGUID (YubiKey Bio…)
 - [ ] Sauvegardes chiffrées, restauration testée, migrations de schéma
 - [ ] Appairage des appareils par QR code (avec l'empreinte du certificat)
 - [ ] Changement de phrase de passe et régénération des codes de récupération via l'API

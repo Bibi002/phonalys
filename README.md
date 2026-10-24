@@ -11,7 +11,7 @@ Phonalys s'adresse aux logopèdes indépendants. Le praticien fait passer ses é
 1. **Les données restent chez le praticien.** Aucun serveur central ni compte hébergé par l'éditeur, et aucune télémétrie.
 2. **IA locale uniquement.** Ollama, llama.cpp, LM Studio, vLLM… sur la machine ou le réseau privé du praticien. Les IA grand public (ChatGPT, Claude, Gemini, Mistral cloud…) sont **bloquées par construction**, voir [`phonalys-ai`](crates/phonalys-ai).
 3. **Chiffrement de bout en bout au repos.** Le chiffrement utilise XChaCha20-Poly1305, les clés sont dérivées par Argon2id et organisées en enveloppes (une clé par dossier patient).
-4. **Double authentification obligatoire.** Une clé matérielle FIDO2 (YubiKey, Nitrokey) est recommandée, et TOTP sert de méthode de secours.
+4. **Double authentification obligatoire, biométrie possible.** Windows Hello, Touch ID, Face ID, l'empreinte Android ou une clé FIDO2 (YubiKey Bio) sont acceptés, et peuvent être rendus obligatoires. Le TOTP et les codes de récupération servent de secours. Aucune donnée biométrique ne quitte l'appareil.
 5. **Le praticien décide.** L'IA propose, le logopède valide. Aucun document ne sort sans relecture humaine.
 
 ## Composants
@@ -24,6 +24,7 @@ Phonalys s'adresse aux logopèdes indépendants. Le praticien fait passer ses é
 | `crates/phonalys-ai` | Politique réseau IA (local uniquement), pseudonymisation | ✅ testé |
 | `crates/phonalys-vault` | Coffre SQLite chiffré par enregistrement, délai après échecs, audit persistant | ✅ testé |
 | `crates/phonalys-auth` | Politique de phrase de passe, TOTP (RFC 6238), codes de récupération, sessions | ✅ testé |
+| `crates/phonalys-webauthn` | Clés biométriques et de sécurité (WebAuthn/FIDO2), vérifiées sans OpenSSL | ✅ testé |
 | `crates/phonalys-server` | Serveur TLS 1.3 : installation, connexion 2FA, verrouillage auto, API patients | ✅ testé (web/PWA en phase 3) |
 | `apps/desktop` | Application Tauri (Windows, Linux) | ⏳ phase 2 |
 | `apps/web` | Interface React, installable en PWA (iPhone, Android) | ⏳ phase 2 |
@@ -44,6 +45,7 @@ Au premier démarrage, la console affiche un **jeton d'installation à usage uni
 |---|---|---|
 | `PHONALYS_DATA_DIR` | `%LOCALAPPDATA%\Phonalys` / `~/.local/share/Phonalys` | Coffre et certificat |
 | `PHONALYS_BIND` | `127.0.0.1:8443` | Adresse d'écoute (`0.0.0.0:8443` pour le réseau local) |
+| `PHONALYS_PUBLIC_ORIGIN` | `https://localhost:8443` | Adresse exacte utilisée par les appareils, qui sert d'identité WebAuthn (nom de domaine obligatoire) |
 | `PHONALYS_TLS_NAMES` | — | Noms et adresses IP supplémentaires du certificat, par exemple `phonalys.lan,192.168.1.20` |
 | `PHONALYS_INSECURE_HTTP` | — | `1` = HTTP en clair, **refusé hors de 127.0.0.1** (développement) |
 
