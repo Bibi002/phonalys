@@ -5,13 +5,15 @@ members = [
     "crates/phonalys-psychometrics",
     "crates/phonalys-core",
     "crates/phonalys-ai",
+    "crates/phonalys-vault",
+    "crates/phonalys-auth",
     "crates/phonalys-server",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.85"
 license = "LicenseRef-Phonalys-Proprietary"
 publish = false
 authors = ["Phonalys"]
@@ -21,11 +23,22 @@ phonalys-crypto = { path = "crates/phonalys-crypto" }
 phonalys-psychometrics = { path = "crates/phonalys-psychometrics" }
 phonalys-core = { path = "crates/phonalys-core" }
 phonalys-ai = { path = "crates/phonalys-ai" }
+phonalys-vault = { path = "crates/phonalys-vault" }
+phonalys-auth = { path = "crates/phonalys-auth" }
+
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"
+sha1 = "0.10"
+data-encoding = "2.6"
+zxcvbn = "3"
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+rcgen = "0.13"
 
 argon2 = { version = "0.5", features = ["std"] }
 chacha20poly1305 = "0.10"
 rand_core = { version = "0.6", features = ["getrandom"] }
-zeroize = { version = "1.8", features = ["derive"] }
+zeroize = { version = "1.8", features = ["derive", "serde"] }
 subtle = "2.6"
 sha2 = "0.10"
 hmac = "0.12"
@@ -38,7 +51,7 @@ time = { version = "0.3", features = ["serde", "macros", "formatting", "parsing"
 libm = "0.2"
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
 axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["set-header", "limit", "trace"] }

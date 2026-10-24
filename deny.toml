@@ -23,6 +23,8 @@ private = { ignore = true }
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Les crates internes (publish = false) se référencent par chemin, sans version.
+allow-wildcard-paths = true
 # OpenSSL est exclu : tout le TLS passe par rustls.
 deny = [{ name = "openssl" }, { name = "openssl-sys" }]
 

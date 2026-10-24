@@ -10,11 +10,19 @@
 - [x] Serveur : en-têtes de durcissement, écoute locale par défaut
 - [x] CI Windows et Linux, cargo-deny
 
-## Phase 2 — Coffre et comptes
-- [ ] Stockage chiffré (SQLite et enveloppes par dossier), migrations, sauvegardes chiffrées et restauration testées
-- [ ] Comptes, sessions, WebAuthn/FIDO2, TOTP, codes de récupération
-- [ ] Verrouillage automatique, délai exponentiel après échecs
-- [ ] TLS (rustls), certificat auto-signé avec épinglage, appairage des appareils par QR code
+## Phase 2 — Coffre et comptes ✅ (en cours)
+- [x] Coffre SQLite chiffré : une clé par enregistrement, AAD, `secure_delete`, permissions restreintes
+- [x] Journal d'audit persistant, vérifié à chaque ouverture (un journal altéré bloque l'ouverture)
+- [x] Phrase de passe : 14 caractères minimum, robustesse évaluée par zxcvbn, informations personnelles refusées
+- [x] TOTP (RFC 6238) avec protection contre le rejeu, 10 codes de récupération à usage unique
+- [x] Délai exponentiel après échecs (phrase de passe **et** second facteur)
+- [x] Sessions : jeton de 256 bits haché, inactivité 5 min, durée maximale 8 h, verrouillage automatique
+- [x] Serveur : jeton d'installation à usage unique, cookie `__Host-`, protection CSRF (en-tête et origine)
+- [x] TLS 1.3 uniquement (rustls), certificat auto-signé, empreinte affichée
+- [ ] **WebAuthn / FIDO2** (clé matérielle) avec l'extension PRF, pour lier la clé du coffre au jeton physique
+- [ ] Sauvegardes chiffrées, restauration testée, migrations de schéma
+- [ ] Appairage des appareils par QR code (avec l'empreinte du certificat)
+- [ ] Changement de phrase de passe et régénération des codes de récupération via l'API
 
 ## Phase 3 — Interfaces
 - [ ] Interface React/TypeScript, accessible (WCAG 2.2 AA), en français (néerlandais et allemand prévus pour la Belgique)

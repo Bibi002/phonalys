@@ -37,7 +37,28 @@ On parle souvent de « chiffrement de niveau militaire » : concrètement, ce so
 
 ## Authentification
 
-- Une **phrase de passe longue** (5 mots ou plus) est obligatoire, et vérifiée contre une liste de mots de passe compromis embarquée hors ligne.
+### Ce qui est en place (phase 2)
+
+| Mesure | Détail |
+|---|---|
+| Installation | Jeton à usage unique affiché sur la console du serveur. Sans lui, personne sur le réseau ne peut s'approprier une installation vierge. |
+| Phrase de passe | Au moins 14 caractères et un score zxcvbn de 4/4 (dictionnaires, claviers, dates). Le nom du praticien est refusé. Elle n'est **jamais stockée**, même hachée : elle sert uniquement à dériver la clé du coffre. |
+| Second facteur | TOTP (RFC 6238) dont le secret est scellé *dans* le coffre. Un code ne peut pas être rejoué, et la fenêtre de tolérance est de ±30 s. |
+| Récupération | 10 codes à usage unique de 80 bits. Seules leurs empreintes sont conservées. |
+| Échecs | Délai exponentiel à partir du 4e échec, plafonné à 15 min. Un second facteur faux compte comme un échec. Les essais sont traités un par un. |
+| Sessions | Jeton de 256 bits, dont seule l'empreinte reste en mémoire. Cookie `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`. Expiration après 5 min d'inactivité ou 8 h au total. |
+| Verrouillage | Sans session active, les clés sont effacées de la mémoire. `/api/lock` verrouille immédiatement tous les appareils. |
+| CSRF | Les requêtes qui modifient l'état exigent un en-tête dédié et une origine identique à celle du serveur. |
+| TLS | TLS 1.3 uniquement. Certificat auto-signé dont l'empreinte SHA-256 est à épingler. |
+
+### Limites, à connaître honnêtement
+
+- **TOTP est un contrôle d'accès, pas un facteur cryptographique.** Quelqu'un qui volerait *le fichier du coffre* **et** la phrase de passe pourrait le déchiffrer hors ligne, sans le code TOTP. La parade prévue est **FIDO2 avec l'extension PRF** : la clé du coffre dépendra alors aussi de la clé physique, et le vol du fichier et de la phrase de passe ne suffira plus.
+- Le délai après échecs ne freine que les essais *via l'application*. Hors ligne, c'est Argon2id (256 MiB par essai) qui protège, d'où l'exigence d'une phrase de passe forte.
+
+### Recommandations
+
+- Une **phrase de passe longue** (5 mots ou plus) est obligatoire. Une vérification contre une liste de mots de passe compromis, embarquée hors ligne, est prévue.
 - Le **second facteur est obligatoire** :
   - recommandé : **clé FIDO2 / WebAuthn** (YubiKey 5, Nitrokey 3, Token2), résistante à l'hameçonnage ;
   - secours : TOTP (Aegis, 2FAS, Ente Auth) et codes de récupération imprimés.

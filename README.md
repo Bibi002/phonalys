@@ -22,7 +22,9 @@ Phonalys s'adresse aux logopèdes indépendants. Le praticien fait passer ses é
 | `crates/phonalys-psychometrics` | Âge, normes, z, percentiles, notes standard/échelle/T, IC 95 %, RCI | ✅ testé |
 | `crates/phonalys-core` | Batteries déclaratives (JSON), cotation, journal d'audit chaîné par HMAC | ✅ testé |
 | `crates/phonalys-ai` | Politique réseau IA (local uniquement), pseudonymisation | ✅ testé |
-| `crates/phonalys-server` | Serveur auto-hébergé : API, web/PWA, synchronisation | 🟡 socle |
+| `crates/phonalys-vault` | Coffre SQLite chiffré par enregistrement, délai après échecs, audit persistant | ✅ testé |
+| `crates/phonalys-auth` | Politique de phrase de passe, TOTP (RFC 6238), codes de récupération, sessions | ✅ testé |
+| `crates/phonalys-server` | Serveur TLS 1.3 : installation, connexion 2FA, verrouillage auto, API patients | ✅ testé (web/PWA en phase 3) |
 | `apps/desktop` | Application Tauri (Windows, Linux) | ⏳ phase 2 |
 | `apps/web` | Interface React, installable en PWA (iPhone, Android) | ⏳ phase 2 |
 
@@ -33,8 +35,17 @@ Prérequis : [Rust stable](https://rustup.rs). Sous Windows, il faut aussi les B
 ```sh
 cargo test --workspace          # tous les tests
 cargo clippy --workspace --all-targets -- -D warnings
-cargo run -p phonalys-server    # écoute sur 127.0.0.1:8443
+cargo run -p phonalys-server    # écoute sur https://127.0.0.1:8443 (TLS 1.3)
 ```
+
+Au premier démarrage, la console affiche un **jeton d'installation à usage unique** et l'**empreinte SHA-256 du certificat**. Notez l'empreinte, puis vérifiez-la sur chaque appareil que vous connectez.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `PHONALYS_DATA_DIR` | `%LOCALAPPDATA%\Phonalys` / `~/.local/share/Phonalys` | Coffre et certificat |
+| `PHONALYS_BIND` | `127.0.0.1:8443` | Adresse d'écoute (`0.0.0.0:8443` pour le réseau local) |
+| `PHONALYS_TLS_NAMES` | — | Noms et adresses IP supplémentaires du certificat, par exemple `phonalys.lan,192.168.1.20` |
+| `PHONALYS_INSECURE_HTTP` | — | `1` = HTTP en clair, **refusé hors de 127.0.0.1** (développement) |
 
 ## Documentation
 

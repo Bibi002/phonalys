@@ -17,10 +17,14 @@ const GENESIS: &str = "phonalys-audit-v1";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditAction {
+    VaultCreated,
     Login,
     LoginFailed,
+    RecoveryCodeUsed,
+    PasswordChanged,
     Unlock,
     Lock,
+    AutoLock,
     PatientCreated,
     PatientViewed,
     PatientUpdated,
@@ -65,6 +69,12 @@ impl AuditLog {
             key,
             entries: Vec::new(),
         }
+    }
+
+    /// Recharge un journal persistant ; refuse une chaîne altérée.
+    pub fn from_entries(key: SecretKey, entries: Vec<AuditEntry>) -> Result<Self, AuditError> {
+        verify_chain(&key, &entries)?;
+        Ok(Self { key, entries })
     }
 
     pub fn entries(&self) -> &[AuditEntry] {
@@ -157,6 +167,18 @@ mod tests {
     #[test]
     fn intact_chain_verifies() {
         assert_eq!(sample().verify(), Ok(()));
+    }
+
+    #[test]
+    fn reload_verifies_chain() {
+        let log = sample();
+        let mut entries = log.entries().to_vec();
+        assert!(AuditLog::from_entries(log.key.clone(), entries.clone()).is_ok());
+        entries[0].actor = "intrus".into();
+        assert_eq!(
+            AuditLog::from_entries(log.key.clone(), entries).unwrap_err(),
+            AuditError::Broken(0)
+        );
     }
 
     #[test]
