@@ -103,6 +103,21 @@ async fn main() -> Result<(), tls::BoxError> {
     let relying_party = relying_party(bind, insecure_http)?;
     tracing::info!(rp_id = %relying_party.id, origins = ?relying_party.origins, "identité WebAuthn");
 
+    // Certificats : le nom public du serveur y figure toujours.
+    let material = if insecure_http {
+        None
+    } else {
+        let mut names: Vec<String> = std::env::var("PHONALYS_TLS_NAMES")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        names.push(relying_party.id.clone());
+        Some(tls::load_or_create(&data_dir, &names)?)
+    };
+
     let (state, setup_token) = AppState::new(Config {
         vault_path,
         kdf: KdfParams::default(),
@@ -111,6 +126,7 @@ async fn main() -> Result<(), tls::BoxError> {
         web_dir: web_dir(),
         backup_dir: std::env::var_os("PHONALYS_BACKUP_DIR")
             .map_or_else(|| data_dir.join("sauvegardes"), PathBuf::from),
+        authority: material.as_ref().map(|m| m.ca.clone()),
     });
     if let Some(token) = setup_token {
         // Écrit sur la console uniquement, jamais dans les journaux persistants.
@@ -119,7 +135,7 @@ async fn main() -> Result<(), tls::BoxError> {
     spawn_auto_lock(state.clone());
     let router = app(state);
 
-    if insecure_http {
+    let Some(material) = material else {
         if !bind.ip().is_loopback() {
             return Err("PHONALYS_INSECURE_HTTP n'est autorisé que sur 127.0.0.1 / ::1".into());
         }
@@ -127,19 +143,11 @@ async fn main() -> Result<(), tls::BoxError> {
         let listener = tokio::net::TcpListener::bind(bind).await?;
         axum::serve(listener, router).await?;
         return Ok(());
-    }
+    };
 
-    let extra_names: Vec<String> = std::env::var("PHONALYS_TLS_NAMES")
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect();
-    let material = tls::load_or_create(&data_dir, &extra_names)?;
     eprintln!(
-        "  Empreinte du certificat (SHA-256) : {}",
-        material.fingerprint
+        "  Autorité locale du cabinet (à comparer lors de l'appairage) : {}\n  Certificat du serveur (SHA-256) : {}",
+        material.ca.fingerprint, material.fingerprint
     );
     tracing::info!(%bind, data_dir = %data_dir.display(), "Phonalys à l'écoute (TLS 1.3)");
 

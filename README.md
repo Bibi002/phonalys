@@ -21,11 +21,11 @@ Phonalys s'adresse aux logopèdes indépendants. Le praticien fait passer ses é
 | `crates/phonalys-crypto` | Dérivation de clés, chiffrement authentifié, enveloppes, hachage des mots de passe | ✅ testé |
 | `crates/phonalys-psychometrics` | Âge, normes, z, percentiles, notes standard/échelle/T, IC 95 %, RCI | ✅ testé |
 | `crates/phonalys-core` | Batteries déclaratives (JSON), cotation, journal d'audit chaîné par HMAC | ✅ testé |
-| `crates/phonalys-ai` | Politique réseau IA (local uniquement), pseudonymisation | ✅ testé |
+| `crates/phonalys-ai` | Politique réseau IA (local uniquement), client Ollama / API locale avec épinglage TLS, pseudonymisation | ✅ testé |
 | `crates/phonalys-vault` | Coffre SQLite chiffré par enregistrement, délai après échecs, audit persistant | ✅ testé |
 | `crates/phonalys-auth` | Politique de phrase de passe, TOTP (RFC 6238), codes de récupération, sessions | ✅ testé |
 | `crates/phonalys-webauthn` | Clés biométriques et de sécurité (WebAuthn/FIDO2), vérifiées sans OpenSSL | ✅ testé |
-| `crates/phonalys-server` | Serveur TLS 1.3 : installation, connexion 2FA, verrouillage auto, API patients | ✅ testé |
+| `crates/phonalys-server` | Serveur TLS 1.3 et autorité locale du cabinet : installation, connexion 2FA et biométrique, verrouillage auto, dossier clinique, coffre documentaire, sauvegardes, assistant de rédaction, appairage | ✅ testé |
 | `web` | Interface React + TypeScript servie par le serveur, installable en PWA (iPhone, Android) | ✅ testé |
 | `apps/desktop` | Application Tauri 2 (Windows, Linux) avec serveur embarqué sur la boucle locale | ✅ compile, lancement vérifié |
 
@@ -47,16 +47,26 @@ cd web && npm run build && cd ..
 cargo run --manifest-path apps/desktop/Cargo.toml
 ```
 
-Sous Linux, installez d'abord `libwebkit2gtk-4.1-dev`, `librsvg2-dev` et `libxdo-dev`. Les installateurs (MSI, NSIS, .deb, .rpm, AppImage) se construisent avec `npx @tauri-apps/cli build` depuis `apps/desktop`.
+Sous Linux, installez d'abord `libwebkit2gtk-4.1-dev`, `librsvg2-dev` et `libxdo-dev`. Les installateurs (MSI, NSIS, .deb, .rpm, AppImage) sont construits par le workflow « Publication » : voir [docs/PUBLICATION.md](docs/PUBLICATION.md).
 
-Au premier démarrage du serveur autonome, la console affiche un **jeton d'installation à usage unique** et l'**empreinte SHA-256 du certificat**. Notez l'empreinte, puis vérifiez-la sur chaque appareil que vous connectez.
+Au premier démarrage du serveur autonome, la console affiche un **jeton d'installation à usage unique** et l'**empreinte de l'autorité locale du cabinet**.
+
+### Connecter les téléphones et tablettes
+
+1. Donnez au serveur un nom du réseau local (par exemple `phonalys.lan`, déclaré dans le DNS de la box ou du routeur) et démarrez-le avec `PHONALYS_BIND=0.0.0.0:8443` et `PHONALYS_PUBLIC_ORIGIN=https://phonalys.lan:8443`.
+2. Sur l'ordinateur, ouvrez « Sécurité › Téléphones et tablettes » : un QR code s'affiche.
+3. Scannez-le avec le téléphone, comparez l'empreinte affichée des deux côtés, puis installez le profil (iPhone, iPad) ou le certificat (Android).
+4. Ajoutez Phonalys à l'écran d'accueil et activez la connexion biométrique.
+
+L'autorité du cabinet est limitée par une contrainte de noms aux adresses du réseau local. Même si sa clé était volée, elle ne permettrait d'usurper aucun site public.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `PHONALYS_DATA_DIR` | `%LOCALAPPDATA%\Phonalys` / `~/.local/share/Phonalys` | Coffre et certificat |
 | `PHONALYS_BIND` | `127.0.0.1:8443` | Adresse d'écoute (`0.0.0.0:8443` pour le réseau local) |
 | `PHONALYS_PUBLIC_ORIGIN` | `https://localhost:8443` | Adresse exacte utilisée par les appareils, qui sert d'identité WebAuthn (nom de domaine obligatoire). **Seule cette adresse est acceptée** (protection contre le DNS rebinding) |
-| `PHONALYS_TLS_NAMES` | — | Noms et adresses IP supplémentaires du certificat, par exemple `phonalys.lan,192.168.1.20` |
+| `PHONALYS_TLS_NAMES` | — | Noms et adresses IP supplémentaires du certificat, par exemple `phonalys.lan,192.168.1.20` (le nom de `PHONALYS_PUBLIC_ORIGIN` y figure toujours) |
+| `PHONALYS_BACKUP_DIR` | `sauvegardes` dans le dossier de données | Dossier des sauvegardes chiffrées |
 | `PHONALYS_WEB_DIR` | `web` à côté de l'exécutable, sinon `web/dist` | Dossier de l'interface compilée |
 | `PHONALYS_INSECURE_HTTP` | — | `1` = HTTP en clair, **refusé hors de 127.0.0.1** (développement) |
 
@@ -65,4 +75,5 @@ Au premier démarrage du serveur autonome, la console affiche un **jeton d'insta
 - [Architecture](docs/ARCHITECTURE.md)
 - [Sécurité et modèle de menace](docs/SECURITE.md)
 - [Conformité légale (RGPD, droit belge, MDR, AI Act)](docs/CONFORMITE.md)
+- [Publier une version](docs/PUBLICATION.md)
 - [Feuille de route](docs/ROADMAP.md)

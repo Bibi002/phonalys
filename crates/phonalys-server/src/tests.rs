@@ -33,6 +33,7 @@ impl Harness {
         let (state, token) = AppState::new(Config {
             web_dir: Some(web),
             backup_dir: dir.path().join("sauvegardes"),
+            authority: None,
             vault_path: dir.path().join("cabinet.phonalys-vault"),
             kdf: KdfParams::insecure_for_tests(),
             sessions: SessionConfig::default(),
@@ -2231,4 +2232,43 @@ async fn local_ai_drafts_a_pseudonymized_report() {
         .unwrap()
         .iter()
         .any(|e| e["action"] == "ai_request"));
+}
+
+#[tokio::test]
+async fn pairing_serves_the_local_authority_without_login() {
+    let dir = tempfile::tempdir().unwrap();
+    let material = tls::load_or_create(dir.path(), &["phonalys.lan".into()]).unwrap();
+    let h = Harness::new();
+    let mut config = (*h.state.config).clone();
+    config.authority = Some(material.ca.clone());
+    let (state, _) = AppState::new(config);
+    let h2 = Harness { state, ..h };
+
+    let (s, _, info) = h2.call("GET", "/api/pairing/info", None, None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(info["available"], true);
+    assert_eq!(info["ca_fingerprint"], material.ca.fingerprint.as_str());
+
+    let (s, headers, body) = get_full(&h2, "/api/pairing/ca.crt", "").await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(headers["content-type"], "application/x-x509-ca-cert");
+    assert!(String::from_utf8(body)
+        .unwrap()
+        .starts_with("-----BEGIN CERTIFICATE-----\n"));
+
+    let (s, headers, body) = get_full(&h2, "/api/pairing/phonalys.mobileconfig", "").await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(headers["content-type"], "application/x-apple-aspen-config");
+    let profile = String::from_utf8(body).unwrap();
+    assert!(profile.contains("com.apple.security.root"));
+    assert!(profile.contains(&data_encoding::BASE64.encode(&material.ca.der)));
+
+    // Le QR code exige une session ; sans autorité (bureau), tout répond 404.
+    let (s, _, _) = h2.call("GET", "/api/pairing/qr", None, None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let plain = Harness::new();
+    let (_, _, info) = plain.call("GET", "/api/pairing/info", None, None).await;
+    assert_eq!(info["available"], false);
+    let (s, _, _) = get_full(&plain, "/api/pairing/ca.crt", "").await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
 }

@@ -151,6 +151,10 @@ button.row:hover { background: var(--bg); }
 .with-button input { flex: 1; min-width: 0; }
 .invite { border-color: var(--primary); }
 .reauth { border-color: var(--primary); }
+.pairing { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: center; }
+.pairing .qr { width: 220px; max-width: 100%; background: #fff; padding: 0.5rem; border-radius: 8px; }
+.fingerprint { display: inline-block; font-size: 0.85rem; word-break: break-all; }
+.steps li { margin: 0.6rem 0; }
 .assistant { margin: 1.25rem 0; padding: 1rem; border: 1px dashed var(--primary); border-radius: 8px; }
 .draft { margin-top: 1rem; }
 .viewer img { display: block; max-width: 100%; margin: 0.75rem auto 0; }

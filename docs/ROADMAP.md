@@ -24,7 +24,7 @@
 - [ ] Option « biométrie stricte » : liste blanche d'AAGUID (YubiKey Bio…)
 - [x] Sauvegardes chiffrées, test de restauration automatique, copie 3-2-1, restauration sur une nouvelle installation
 - [ ] Migrations de schéma
-- [ ] Appairage des appareils par QR code (avec l'empreinte du certificat)
+- [x] Appairage des appareils par QR code, autorité locale à contrainte de noms, profil iOS et certificat Android
 - [ ] Changement de phrase de passe et régénération des codes de récupération via l'API
 
 ## Phase 3 — Interfaces

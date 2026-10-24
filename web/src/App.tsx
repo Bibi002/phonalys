@@ -9,6 +9,7 @@ import { Documents } from "./screens/Documents";
 import { Exercises } from "./screens/Exercises";
 import { Home } from "./screens/Home";
 import { Login } from "./screens/Login";
+import { Pairing } from "./screens/Pairing";
 import { Patients } from "./screens/Patients";
 import { Security } from "./screens/Security";
 import { Settings } from "./screens/Settings";
@@ -39,6 +40,8 @@ const KEEPALIVE_SECS = 60;
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
+  // Ouverte par le QR code d'appairage, avant toute connexion.
+  const [pairing, setPairing] = useState(() => window.location.hash === "#appairage");
   const [page, setPage] = useState<Page>("home");
   const [patientId, setPatientId] = useState<string>();
   const [idle, setIdle] = useState(900);
@@ -123,6 +126,7 @@ export function App() {
     window.scrollTo?.(0, 0);
   }, []);
 
+  if (pairing) return <Pairing onDone={() => setPairing(false)} />;
   if (phase === "loading") return <main className="narrow"><p className="muted">Connexion au serveur…</p></main>;
   if (phase === "offline")
     return (

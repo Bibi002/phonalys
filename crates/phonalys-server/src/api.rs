@@ -99,7 +99,7 @@ pub struct SetupResponse {
     recovery_codes: Vec<String>,
 }
 
-fn qr_svg(data: &str) -> Result<String, ApiError> {
+pub(crate) fn qr_svg(data: &str) -> Result<String, ApiError> {
     let code = qrcode::QrCode::with_error_correction_level(data, qrcode::EcLevel::M)
         .map_err(|_| ApiError::Internal)?;
     Ok(code

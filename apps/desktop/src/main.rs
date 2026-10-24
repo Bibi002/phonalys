@@ -79,6 +79,8 @@ async fn start_server(web_dir: Option<PathBuf>) -> Result<Url, BoxError> {
         },
         web_dir,
         backup_dir: data_dir.join("sauvegardes"),
+        // Boucle locale sans TLS : rien à installer sur un autre appareil.
+        authority: None,
     });
     spawn_auto_lock(state.clone());
     let router = app(state);

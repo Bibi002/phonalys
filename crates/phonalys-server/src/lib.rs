@@ -5,6 +5,7 @@ mod api;
 mod backup;
 mod documents;
 mod error;
+mod pairing;
 mod passkey;
 mod records;
 mod state;
@@ -216,6 +217,7 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/api/ai/models", post(ai::models))
         .route("/api/ai/draft", post(ai::draft))
+        .route("/api/pairing/qr", get(pairing::qr))
         .route("/api/security", get(passkey::status))
         .route(
             "/api/security/policy",
@@ -239,6 +241,12 @@ pub fn app(state: AppState) -> Router {
         .route("/api/login/passkey/finish", post(passkey::login_finish))
         .route("/api/login/quick/start", post(passkey::quick_start))
         .route("/api/login/quick/finish", post(passkey::quick_finish))
+        .route("/api/pairing/info", get(pairing::info))
+        .route("/api/pairing/ca.crt", get(pairing::certificate))
+        .route(
+            "/api/pairing/phonalys.mobileconfig",
+            get(pairing::mobileconfig),
+        )
         // Une route d'API inconnue ne doit jamais renvoyer la page de l'application.
         .route("/api/{*rest}", any(|| async { ApiError::NotFound }))
         .merge(protected)

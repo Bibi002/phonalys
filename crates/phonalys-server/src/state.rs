@@ -25,6 +25,8 @@ pub struct Config {
     pub web_dir: Option<PathBuf>,
     /// Dossier des sauvegardes chiffrées.
     pub backup_dir: PathBuf,
+    /// Autorité locale à installer sur les appareils (serveur en TLS uniquement).
+    pub authority: Option<crate::tls::CaInfo>,
 }
 
 /// Durée de validité d'un défi WebAuthn, en secondes.

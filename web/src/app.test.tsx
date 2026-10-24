@@ -144,6 +144,33 @@ describe("assistant de rédaction", () => {
   });
 });
 
+describe("appairage", () => {
+  const FP = Array.from({ length: 32 }, (_, i) => i.toString(16).padStart(2, "0").toUpperCase()).join(":");
+
+  it("reconnaît la plateforme et abrège l'empreinte", async () => {
+    const { platform, shortFingerprint } = await import("./screens/Pairing");
+    expect(platform("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)")).toBe("ios");
+    expect(platform("Mozilla/5.0 (Linux; Android 15; Pixel 9)")).toBe("android");
+    expect(platform("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")).toBe("autre");
+    expect(shortFingerprint(FP)).toBe("00:01:02:03 … 1C:1D:1E:1F");
+  });
+
+  it("le lien du QR code ouvre la page d'appairage sans connexion", async () => {
+    window.history.replaceState(null, "", "/#appairage");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url === "/api/pairing/info" ? json({ available: true, ca_fingerprint: FP, origin: "https://phonalys.lan:8443" }) : json({ error: "x" }, 404),
+      ),
+    );
+    render(<App />);
+    await screen.findByText("Connecter cet appareil au cabinet");
+    await screen.findByText(FP);
+    fireEvent.click(screen.getByRole("button", { name: "Continuer" }));
+    expect(window.location.hash).toBe("");
+  });
+});
+
 describe("coffre documentaire", () => {
   it("demande de confirmer son identité avant d'afficher un document", async () => {
     fakeServer();

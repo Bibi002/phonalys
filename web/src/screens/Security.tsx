@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type BindingResult, type PasskeyInfo, type SecurityStatus } from "../api";
 import { ConfirmButton, describeError, ErrorBox, Field, PasswordField, RecoveryCodes, useAction } from "../components";
 import { createCredential, describeWebAuthnError, getAssertion, webauthnAvailable } from "../webauthn";
+import { PairingSection } from "./Pairing";
 
 const describe = (e: unknown) => (e instanceof DOMException ? describeWebAuthnError(e) : describeError(e));
 
@@ -224,6 +225,7 @@ export function Security() {
           </button>
         )}
       </section>
+      <PairingSection />
     </>
   );
 }

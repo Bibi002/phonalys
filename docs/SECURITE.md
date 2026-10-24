@@ -63,7 +63,7 @@ o-store, et ne peut être encadré que par l'application. Chaque ouverture est i
 | Synthèse vocale | Exercices : seules les voix installées sur l'appareil sont utilisées (`localService`) ; une voix « en ligne » enverrait le texte à un tiers. |
 | Application web | CSP stricte (aucun script ni style en ligne, vérifié à chaque compilation). Le service worker ne met en cache que l'interface, **jamais** les réponses de l'API. Aucun stockage local des données dans le navigateur. |
 | Application de bureau | Serveur embarqué à l'écoute de la seule boucle locale, port aléatoire. La fenêtre ne peut naviguer vers aucune autre adresse et n'a accès à aucune commande native. |
-| TLS | TLS 1.3 uniquement. Certificat auto-signé dont l'empreinte SHA-256 est à épingler. |
+| TLS | TLS 1.3 uniquement. **Autorité locale du cabinet** créée au premier démarrage : elle émet le certificat du serveur (397 jours, renouvelé automatiquement 30 jours avant l'échéance, sans rien réinstaller sur les appareils). Elle porte une **contrainte de noms** (RFC 5280) qui la limite aux noms du réseau local (`.lan`, `.local`, `.home.arpa`, `.internal`, `localhost` et les noms configurés) et aux plages privées : même volée, sa clé ne permettrait d'usurper aucun site public (vérifié par les tests). L'appairage se fait par QR code ; l'utilisateur compare l'empreinte de l'autorité sur les deux écrans avant d'installer le profil (iOS) ou le certificat (Android). |
 
 ### Biométrie et RGPD
 
