@@ -14,6 +14,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # Les versions majeures (RustCrypto, rcgen, ed25519-dalek…) changent l'API et
+      # doivent être migrées ensemble, à la main, avec les tests. Les alertes de
+      # sécurité restent signalées quelle que soit la version.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: cargo
     directory: /apps/desktop
@@ -21,6 +27,8 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
       # glib 0.18 est imposée par la pile GTK de Tauri sous Linux : aucune version
       # corrigée n'est compatible pour l'instant. Phonalys n'utilise pas la fonction
       # concernée (VariantStrIter). À réexaminer à chaque mise à jour de Tauri.
