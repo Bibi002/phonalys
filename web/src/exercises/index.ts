@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import { Barrage, EmpanChiffres, Fluence, SequencesSpatiales } from "./cognition";
 import type { ExerciseProps } from "./common";
 import { Categories, LectureFlash, Rimes, Syllabes } from "./langage";
+import { Calcul, Contraires, Phrases, SonInitial, Suppression } from "./plus";
 
 export interface ExerciseDef {
   id: string;
@@ -32,12 +33,44 @@ export const EXERCISES: readonly ExerciseDef[] = [
     Component: Rimes,
   },
   {
+    id: "son-initial",
+    titre: "Le premier son",
+    domaine: "Métaphonologie",
+    description: "Identification du son au début du mot, puis discrimination de sons proches (p/b, f/v, ch/j…).",
+    niveaux: ["Sons bien différents", "Sons proches"],
+    Component: SonInitial,
+  },
+  {
+    id: "suppression",
+    titre: "Sans la syllabe",
+    domaine: "Métaphonologie",
+    description: "Suppression syllabique : dire le mot sans sa première, puis sans sa dernière syllabe.",
+    niveaux: ["Début du mot", "Fin du mot"],
+    Component: Suppression,
+  },
+  {
     id: "categories",
     titre: "Ranger les mots",
     domaine: "Lexique et sémantique",
     description: "Catégorisation sémantique (fruits, animaux, vêtements…).",
     niveaux: ["2 familles", "3 familles", "4 familles"],
     Component: Categories,
+  },
+  {
+    id: "contraires",
+    titre: "Les contraires",
+    domaine: "Lexique et sémantique",
+    description: "Antonymes : adjectifs concrets, puis verbes, adverbes et prépositions.",
+    niveaux: ["Adjectifs courants", "Tous les mots"],
+    Component: Contraires,
+  },
+  {
+    id: "phrases",
+    titre: "Vrai ou faux ?",
+    domaine: "Compréhension",
+    description: "Compréhension de phrases : sens commun, puis négations et comparaisons, puis passives, relatives et ordre temporel.",
+    niveaux: ["Phrases simples", "Négations et comparaisons", "Structures complexes"],
+    Component: Phrases,
   },
   {
     id: "lecture-flash",
@@ -72,6 +105,14 @@ export const EXERCISES: readonly ExerciseDef[] = [
     description: "Attention sélective et discrimination visuelle (b, d, p, q).",
     niveaux: ["b parmi d", "b parmi d, p, q", "q parmi b, d, p"],
     Component: Barrage,
+  },
+  {
+    id: "calcul",
+    titre: "Nombres et calcul",
+    domaine: "Cognition mathématique",
+    description: "Comparaison de nombres, additions, soustractions et tables de multiplication.",
+    niveaux: ["Comparer (0 à 20)", "Additions jusqu'à 10", "Additions et soustractions jusqu'à 20", "Tables de 2 à 5", "Tables de 6 à 9"],
+    Component: Calcul,
   },
   {
     id: "fluence",

@@ -235,7 +235,15 @@ button.slot.absent { border-left: 4px solid var(--danger); }
 .report-head .right { text-align: right; }
 .report section { margin-top: 1rem; }
 .signature { margin-top: 2rem; border-top: 1px solid var(--border); padding-top: 0.6rem; }
+.big-sentence { font-size: 1.5rem; line-height: 1.4; max-width: 34rem; margin: 0.5rem auto; }
 .profile { margin: 1rem 0; }
+.progress-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 1rem; margin: 1rem 0; }
+.progress-chart { margin: 0; }
+.progress-chart svg { width: 100%; height: auto; }
+.progress-chart .axis { stroke: var(--border); stroke-width: 1; }
+.progress-chart .tick { fill: var(--muted); font-size: 10px; }
+.progress-chart .line { fill: none; stroke: var(--primary); stroke-width: 2.5; }
+.progress-chart .dot { fill: var(--primary); }
 .profile svg { width: 100%; max-width: 640px; height: auto; }
 .profile .axis { stroke: var(--border); stroke-width: 1; }
 .profile .axis.zero { stroke: var(--muted); stroke-width: 2; }

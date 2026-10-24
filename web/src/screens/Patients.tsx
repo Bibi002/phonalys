@@ -4,6 +4,7 @@ import type { Navigate } from "../App";
 import { ConfirmButton, Empty, ErrorBox, Field, Select, Tabs, TextArea, useAction } from "../components";
 import { exerciseTitle } from "../exercises";
 import { DocumentsPanel } from "./Documents";
+import { Progression } from "./Progression";
 import { usePatients, useRecords } from "../hooks";
 import {
   age,
@@ -531,6 +532,8 @@ function PatientExercices({ patient, navigate }: { patient: Patient; navigate: N
       {sorted.length === 0 ? (
         <Empty>Aucun résultat d'exercice pour ce patient.</Empty>
       ) : (
+        <>
+        <Progression results={sorted} />
         <div className="table-wrap">
           <table className="results read">
             <thead>
@@ -557,6 +560,7 @@ function PatientExercices({ patient, navigate }: { patient: Patient; navigate: N
             </tbody>
           </table>
         </div>
+        </>
       )}
     </section>
   );
