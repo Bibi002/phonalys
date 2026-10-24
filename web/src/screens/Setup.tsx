@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { api, type SetupResult } from "../api";
-import { ErrorBox, Field, RecoveryCodes, useAction } from "../components";
+import { ErrorBox, Field, PasswordField, RecoveryCodes, useAction } from "../components";
 
 /**
  * Jeton d'installation transmis par l'application de bureau dans le fragment de l'URL
@@ -82,23 +82,25 @@ export function Setup({ onDone }: { onDone: () => void }) {
           hint="Affiché dans la console au démarrage du serveur."
         />
         <Field label="Votre nom (facultatif)" value={name} onChange={setName} autoComplete="name" />
-        <Field
+        <PasswordField
           label="Phrase de passe"
-          type="password"
           value={passphrase}
           onChange={setPassphrase}
           autoComplete="new-password"
           required
           hint="Au moins 14 caractères ; idéalement 5 mots ou plus. Un gestionnaire de mots de passe (Bitwarden, KeePassXC) peut la générer et la retenir."
         />
-        <Field
+        <PasswordField
           label="Confirmation"
-          type="password"
           value={confirm}
           onChange={setConfirm}
           autoComplete="new-password"
           required
         />
+        <p className="muted">
+          Si votre navigateur propose de générer ou d'enregistrer un mot de passe, vérifiez avec « Afficher » que
+          c'est bien celui que vous retiendrez.
+        </p>
         <p className="warning">
           Sans cette phrase de passe, le coffre est définitivement illisible. Il n'existe aucune
           réinitialisation.

@@ -3,11 +3,51 @@ import { ApiError } from "./api";
 
 export function describeError(e: unknown): string {
   if (e instanceof ApiError) {
-    if (e.status === 429 && e.retryAfter) return `${e.message}`;
-    if (e.status === 401) return "Identifiants ou code invalides.";
-    return e.message;
+    const m = e.message;
+    return m.charAt(0).toUpperCase() + m.slice(1) + (/[.!?]$/.test(m) ? "" : ".");
   }
   return e instanceof Error ? e.message : String(e);
+}
+
+/** Champ de phrase de passe avec bouton « Afficher » pour vérifier la saisie. */
+export function PasswordField(props: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete: "current-password" | "new-password";
+  required?: boolean;
+  autoFocus?: boolean;
+  hint?: ReactNode;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <label className="field">
+      <span>{props.label}</span>
+      <span className="with-button">
+        <input
+          type={visible ? "text" : "password"}
+          aria-label={props.label}
+          value={props.value}
+          onChange={(e) => props.onChange(e.target.value)}
+          autoComplete={props.autoComplete}
+          required={props.required ?? false}
+          autoFocus={props.autoFocus ?? false}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+        />
+        <button
+          type="button"
+          className="ghost"
+          aria-pressed={visible}
+          onClick={() => setVisible(!visible)}
+        >
+          {visible ? "Masquer" : "Afficher"}
+        </button>
+      </span>
+      {props.hint ? <small>{props.hint}</small> : null}
+    </label>
+  );
 }
 
 export function ErrorBox({ error }: { error: string | undefined }) {

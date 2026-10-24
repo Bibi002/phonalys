@@ -15,6 +15,10 @@ pub enum ApiError {
     Conflict,
     NotInitialized,
     TooManyAttempts(i64),
+    /// Connexion refusée ; nombre d'essais restants avant le blocage.
+    LoginFailed(u32),
+    /// Phrase de passe ou code de récupération faux (on ne dit pas lequel).
+    RecoveryRejected,
     Internal,
 }
 
@@ -34,20 +38,57 @@ impl IntoResponse for ApiError {
             }
             ApiError::TooManyAttempts(s) => (
                 StatusCode::TOO_MANY_REQUESTS,
-                format!("trop de tentatives, réessayez dans {s} s"),
+                format!(
+                    "connexion bloquée après {} échecs : réessayez dans {}, ou utilisez un code \
+                     de récupération pour débloquer tout de suite",
+                    phonalys_vault::MAX_ATTEMPTS,
+                    human_delay(*s)
+                ),
+            ),
+            ApiError::RecoveryRejected => (
+                StatusCode::UNAUTHORIZED,
+                "phrase de passe ou code de récupération incorrect".to_owned(),
+            ),
+            ApiError::LoginFailed(0) => (
+                StatusCode::UNAUTHORIZED,
+                "identifiants incorrects : la connexion est maintenant bloquée ; un code de \
+                 récupération permet de débloquer tout de suite"
+                    .to_owned(),
+            ),
+            ApiError::LoginFailed(n) => (
+                StatusCode::UNAUTHORIZED,
+                format!(
+                    "identifiants incorrects : encore {n} essai{} avant le blocage",
+                    if *n > 1 { "s" } else { "" }
+                ),
             ),
             ApiError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "erreur interne".to_owned(),
             ),
         };
-        let mut res = (status, Json(serde_json::json!({ "error": message }))).into_response();
+        let mut body = serde_json::json!({ "error": message });
+        match &self {
+            ApiError::LoginFailed(n) => body["remaining_attempts"] = (*n).into(),
+            ApiError::TooManyAttempts(s) => body["retry_after_secs"] = (*s).into(),
+            _ => {}
+        }
+        let mut res = (status, Json(body)).into_response();
         if let ApiError::TooManyAttempts(s) = self {
             if let Ok(v) = s.to_string().parse() {
                 res.headers_mut().insert(header::RETRY_AFTER, v);
             }
         }
         res
+    }
+}
+
+/// « 15 min », « 40 s »…
+fn human_delay(secs: i64) -> String {
+    if secs >= 60 {
+        format!("{} min", (secs + 59) / 60)
+    } else {
+        format!("{secs} s")
     }
 }
 

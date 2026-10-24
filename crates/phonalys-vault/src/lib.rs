@@ -35,9 +35,10 @@ const FORMAT_VERSION: i64 = 2;
 const MASTER_CONTEXT: &[u8] = b"phonalys:v1:master";
 const AUDIT_KEY_SECRET: &str = "audit-key";
 /// Nombre d'échecs tolérés avant d'imposer un délai.
-const FREE_ATTEMPTS: u32 = 3;
-/// Délai maximal entre deux essais, en secondes.
-const MAX_DELAY_SECS: i64 = 15 * 60;
+pub const MAX_ATTEMPTS: u32 = 4;
+/// Durée du blocage après `MAX_ATTEMPTS` échecs consécutifs, en secondes. Un code de
+/// récupération permet de débloquer immédiatement.
+pub const LOCKOUT_SECS: i64 = 15 * 60;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
@@ -332,13 +333,34 @@ fn register_failure(conn: &Connection, now: i64) -> Result<(), VaultError> {
     Ok(())
 }
 
-/// Délai imposé après `failures` échecs consécutifs : 0, puis 1 s, 2 s, 4 s… plafonné.
+/// Délai imposé après `failures` échecs consécutifs : aucun pendant les
+/// `MAX_ATTEMPTS - 1` premiers, puis un blocage de `LOCKOUT_SECS` à chaque nouvel échec.
 pub fn lockout_delay(failures: u32) -> i64 {
-    if failures <= FREE_ATTEMPTS {
-        return 0;
+    if failures < MAX_ATTEMPTS {
+        0
+    } else {
+        LOCKOUT_SECS
     }
-    let exp = (failures - FREE_ATTEMPTS - 1).min(20);
-    (1i64 << exp).min(MAX_DELAY_SECS)
+}
+
+fn failures(conn: &Connection) -> Result<u32, VaultError> {
+    Ok(
+        conn.query_row("SELECT failures FROM lockout WHERE id = 1", [], |r| {
+            r.get(0)
+        })?,
+    )
+}
+
+/// Essais restants avant le blocage (0 : bloqué, ou dernier essai après un blocage).
+fn remaining(conn: &Connection) -> Result<u32, VaultError> {
+    Ok(MAX_ATTEMPTS.saturating_sub(failures(conn)?))
+}
+
+impl LockedVault {
+    /// Essais restants avant le blocage de la connexion normale.
+    pub fn remaining_attempts(&self) -> Result<u32, VaultError> {
+        remaining(&self.conn)
+    }
 }
 
 impl UnlockedVault {
@@ -346,6 +368,11 @@ impl UnlockedVault {
     pub fn lock(self) -> Result<LockedVault, VaultError> {
         let UnlockedVault { conn, .. } = self;
         Ok(LockedVault { conn })
+    }
+
+    /// Essais restants avant le blocage de la connexion normale.
+    pub fn remaining_attempts(&self) -> Result<u32, VaultError> {
+        remaining(&self.conn)
     }
 
     /// Signale un échec du second facteur (le mot de passe était correct).

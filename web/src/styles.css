@@ -148,3 +148,7 @@ button.row:hover { background: var(--bg); }
 @media print {
   .topbar, button { display: none; }
 }
+
+.with-button { display: flex; gap: 0.5rem; }
+.with-button input { flex: 1; min-width: 0; }
+.invite { border-color: var(--primary); }

@@ -2,7 +2,7 @@
 
 use phonalys_core::audit::AuditAction;
 use phonalys_crypto::KdfParams;
-use phonalys_vault::{lockout_delay, LockedVault, UnlockedVault, VaultError};
+use phonalys_vault::{lockout_delay, LockedVault, UnlockedVault, VaultError, LOCKOUT_SECS};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
@@ -70,29 +70,36 @@ fn wrong_password_is_rejected_and_delayed() {
     drop(vault);
 
     let mut locked = LockedVault::open(&path).unwrap();
-    for _ in 0..3 {
+    assert_eq!(locked.remaining_attempts().unwrap(), 4);
+    for left in [3, 2, 1] {
         let (back, err) = locked.unlock_at(b"mauvais", 1_000).unwrap_err();
         assert!(matches!(err, VaultError::WrongPassword));
+        assert_eq!(back.remaining_attempts().unwrap(), left);
         locked = back;
     }
-    // 4e échec : un délai est imposé.
+    // 4e échec : blocage de 15 minutes, même avec le bon mot de passe.
     let (back, _) = locked.unlock_at(b"mauvais", 1_000).unwrap_err();
+    assert_eq!(back.remaining_attempts().unwrap(), 0);
     let (back, err) = back.unlock_at(PASSWORD, 1_000).unwrap_err();
-    assert!(matches!(err, VaultError::TooManyAttempts(1)), "{err:?}");
-    // Une fois le délai écoulé, le bon mot de passe fonctionne.
-    let vault = back.unlock_at(PASSWORD, 1_001).unwrap();
+    assert!(
+        matches!(err, VaultError::TooManyAttempts(LOCKOUT_SECS)),
+        "{err:?}"
+    );
+    // Une fois le blocage écoulé, le bon mot de passe fonctionne.
+    let vault = back.unlock_at(PASSWORD, 1_000 + LOCKOUT_SECS).unwrap();
 
-    // Un second facteur faux prolonge le délai, même avec le bon mot de passe.
-    vault.register_failure(1_001).unwrap();
+    // Un second facteur faux prolonge le blocage, même avec le bon mot de passe.
+    let t = 1_000 + LOCKOUT_SECS;
+    vault.register_failure(t).unwrap();
     let (back, err) = vault
         .lock()
         .unwrap()
-        .unlock_at(PASSWORD, 1_002)
+        .unlock_at(PASSWORD, t + 1)
         .unwrap_err();
-    assert!(matches!(err, VaultError::TooManyAttempts(1)), "{err:?}");
+    assert!(matches!(err, VaultError::TooManyAttempts(_)), "{err:?}");
 
     // Seule une authentification complète remet le compteur à zéro.
-    let vault = back.unlock_at(PASSWORD, 1_003).unwrap();
+    let vault = back.unlock_at(PASSWORD, t + LOCKOUT_SECS).unwrap();
     vault.reset_lockout().unwrap();
     let (back, _) = vault
         .lock()
@@ -106,15 +113,14 @@ fn wrong_password_is_rejected_and_delayed() {
 }
 
 #[test]
-fn lockout_delay_grows_and_is_capped() {
+fn four_attempts_then_fifteen_minutes() {
     assert_eq!(
         (0..=3).map(lockout_delay).collect::<Vec<_>>(),
         vec![0, 0, 0, 0]
     );
-    assert_eq!(lockout_delay(4), 1);
-    assert_eq!(lockout_delay(5), 2);
-    assert_eq!(lockout_delay(10), 64);
-    assert_eq!(lockout_delay(1_000), 15 * 60);
+    assert_eq!(lockout_delay(4), 15 * 60);
+    assert_eq!(lockout_delay(5), 15 * 60);
+    assert_eq!(lockout_delay(u32::MAX), 15 * 60);
 }
 
 #[test]

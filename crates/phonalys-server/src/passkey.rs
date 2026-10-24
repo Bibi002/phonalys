@@ -20,7 +20,7 @@ use axum::response::Response;
 use axum::Json;
 use phonalys_auth::RecoveryCodes;
 use phonalys_core::audit::AuditAction;
-use phonalys_vault::{FactorKind, LockedVault, UnlockedVault};
+use phonalys_vault::{FactorKind, LockedVault, UnlockedVault, VaultError};
 use phonalys_webauthn::{
     authentication_options, decode_prf_output, finish_authentication, finish_registration,
     registration_options, AuthenticationResponse, RegistrationResponse, StoredCredential,
@@ -488,9 +488,14 @@ pub async fn login_finish(
                     now as i64,
                 ) {
                     Ok(v) => Some(v),
-                    Err((_, e)) => {
+                    Err((locked, e)) => {
                         tracing::warn!(error = %e, "échec d'ouverture par clé liée");
-                        return Err(e.into());
+                        return Err(match e {
+                            VaultError::FactorRejected => {
+                                ApiError::LoginFailed(locked.remaining_attempts()?)
+                            }
+                            e => e.into(),
+                        });
                     }
                 }
             }

@@ -1192,3 +1192,87 @@ async fn http2_requests_without_host_header_work() {
         .unwrap();
     assert_eq!(send(&h, req).await, StatusCode::MISDIRECTED_REQUEST);
 }
+
+// --- Politique de blocage : 4 essais, puis code de récupération -------------------------
+
+#[tokio::test]
+async fn four_attempts_then_blocked_and_recovery_code_unblocks() {
+    let h = Harness::new();
+    let (totp, codes) = h.setup().await;
+    let wrong = || json!({ "passphrase": "phrase de passe erronée", "code": "000000" });
+
+    for left in [3, 2, 1, 0] {
+        let (s, _, body) = h.call("POST", "/api/login", Some(wrong()), None).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED, "{body}");
+        assert_eq!(body["remaining_attempts"], left, "{body}");
+    }
+    // Bloqué, même avec les bons identifiants…
+    let (s, headers, body) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "code": totp.code_at(state::now()) })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("code de récupération"));
+    assert!(body["retry_after_secs"].as_i64().unwrap() > 800);
+    assert!(headers.contains_key("retry-after"));
+
+    // …mais le code de récupération débloque tout de suite.
+    let (s, _, body) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "recovery_code": codes[0] })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "{body}");
+    h.call("POST", "/api/lock", None, None).await;
+    h.state.auto_lock(state::now() + 10 * 3600);
+
+    // Le compteur est remis à zéro : la connexion quotidienne refonctionne.
+    h.login_at(&totp, state::now() + 30).await;
+}
+
+#[tokio::test]
+async fn recovery_failure_does_not_reveal_which_part_is_wrong() {
+    let h = Harness::new();
+    let (_, codes) = h.setup().await;
+    let (s1, _, b1) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": "fausse phrase", "recovery_code": codes[0] })),
+            None,
+        )
+        .await;
+    let (s2, _, b2) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "recovery_code": "AAAA-BBBB-CCCC-DDDD" })),
+            None,
+        )
+        .await;
+    assert_eq!(
+        (s1, s2),
+        (StatusCode::UNAUTHORIZED, StatusCode::UNAUTHORIZED)
+    );
+    assert_eq!(b1, b2);
+    // Le code n'a pas été consommé par l'essai avec la mauvaise phrase de passe.
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "recovery_code": codes[0] })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+}

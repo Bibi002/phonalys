@@ -138,6 +138,14 @@ impl LockedVault {
         })
     }
 
+    /// Dérive la clé de la phrase de passe **sans** contrôle du blocage, pour une
+    /// connexion par code de récupération (voir `unlock_with_recovery_at`).
+    pub fn recovery_password_key(&self, password: &[u8]) -> Result<PasswordKey, VaultError> {
+        Ok(PasswordKey {
+            kek: derive_stored_kek(&self.conn, password)?,
+        })
+    }
+
     pub fn is_hardware_bound(&self) -> Result<bool, VaultError> {
         is_bound(&self.conn)
     }
@@ -196,7 +204,10 @@ impl LockedVault {
         now: i64,
     ) -> Result<UnlockedVault, (Self, VaultError)> {
         let attempt = || -> Result<SecretKey, VaultError> {
-            check_lockout(&self.conn, now)?;
+            // Pas de contrôle du blocage : le code de récupération sert justement à
+            // débloquer. Ses 80 bits aléatoires le rendent impossible à deviner, et chaque
+            // essai coûte une dérivation Argon2id.
+            let _ = now;
             // Tous les essais sont faits, pour un temps de réponse indépendant du code.
             let mut found = None;
             for (id, blob) in wraps(&self.conn, FactorKind::Recovery)? {

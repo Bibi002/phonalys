@@ -32,14 +32,14 @@ describe("connexion", () => {
     expect((screen.getByLabelText("Phrase de passe") as HTMLInputElement).value).toBe("");
   });
 
-  it("affiche une erreur générique en cas d'échec", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(401, { error: "authentification requise ou invalide" })));
+  it("affiche le message du serveur en cas d'échec de récupération", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(401, { error: "phrase de passe ou code de récupération incorrect" })));
     render(<Login onLoggedIn={() => undefined} />);
     fireEvent.click(screen.getByRole("tab", { name: "Code de récupération" }));
     fireEvent.change(screen.getByLabelText("Phrase de passe"), { target: { value: "x" } });
     fireEvent.change(screen.getByLabelText(/^Code de récupération/), { target: { value: "AAAA-BBBB-CCCC-DDDD" } });
     fireEvent.click(screen.getByRole("button", { name: "Déverrouiller" }));
-    expect((await screen.findByRole("alert")).textContent).toBe("Identifiants ou code invalides.");
+    expect((await screen.findByRole("alert")).textContent).toBe("Phrase de passe ou code de récupération incorrect.");
   });
 
   it("les champs de phrase de passe sont compatibles avec les gestionnaires de mots de passe", () => {
@@ -88,5 +88,58 @@ describe("installation depuis l'application de bureau", () => {
     expect(takeSetupToken()).toBe("");
     history.replaceState(null, "", "/#setup=<script>");
     expect(takeSetupToken()).toBe("");
+  });
+});
+
+describe("connexion : accompagnement", () => {
+  beforeEach(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      // stockage indisponible
+    }
+  });
+
+  it("propose le code à 6 chiffres par défaut tant qu'aucune clé n'a servi", () => {
+    render(<Login onLoggedIn={() => undefined} />);
+    expect(screen.getByRole("tab", { name: "Code à 6 chiffres" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("bascule vers le code à 6 chiffres si aucune clé biométrique n'existe", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(400, { error: "aucune clé biométrique enregistrée" })));
+    render(<Login onLoggedIn={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Clé biométrique" }));
+    fireEvent.change(screen.getByLabelText("Phrase de passe"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continuer avec ma clé" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Aucune clé biométrique n'est encore enregistrée/);
+    expect(screen.getByRole("tab", { name: "Code à 6 chiffres" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("indique les essais restants, puis propose le déblocage par code de récupération", async () => {
+    const replies = [
+      jsonResponse(401, { error: "identifiants incorrects : encore 1 essai avant le blocage", remaining_attempts: 1 }),
+      jsonResponse(429, { error: "connexion bloquée après 4 échecs : réessayez dans 15 min, ou utilisez un code de récupération pour débloquer tout de suite", retry_after_secs: 900 }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => replies.shift() as Response));
+    render(<Login onLoggedIn={() => undefined} />);
+    fireEvent.change(screen.getByLabelText("Phrase de passe"), { target: { value: "x" } });
+    fireEvent.change(screen.getByLabelText(/Code de l'application/), { target: { value: "000000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Déverrouiller" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/encore 1 essai/);
+    expect(screen.queryByRole("button", { name: /Débloquer/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Déverrouiller" }));
+    const unblock = await screen.findByRole("button", { name: "Débloquer avec un code de récupération" });
+    fireEvent.click(unblock);
+    expect(screen.getByRole("tab", { name: "Code de récupération" }).getAttribute("aria-selected")).toBe("true");
+    screen.getByLabelText(/^Code de récupération/);
+  });
+
+  it("permet d'afficher la phrase de passe pour vérifier la saisie", () => {
+    render(<Login onLoggedIn={() => undefined} />);
+    const input = screen.getByLabelText("Phrase de passe") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Afficher" }));
+    expect(input.type).toBe("text");
   });
 });

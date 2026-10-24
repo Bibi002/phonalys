@@ -193,13 +193,18 @@ fn login_with_recovery(
     now: u64,
 ) -> Result<Response, ApiError> {
     let locked = LockedVault::open(&state.config.vault_path)?;
-    let pk = locked.password_key_at(passphrase, now as i64)?;
+    // Le code de récupération débloque une connexion bloquée : pas de contrôle du blocage.
+    let pk = locked.recovery_password_key(passphrase)?;
     let secret = phonalys_auth::recovery::normalize(code);
     let fresh = match locked.unlock_with_recovery_at(&pk, secret.as_bytes(), now as i64) {
         Ok(v) => v,
         Err((_, e)) => {
             tracing::warn!(error = %e, "échec de connexion par code de récupération");
-            return Err(e.into());
+            return Err(match e {
+                // Phrase de passe ou code faux : on ne dit pas lequel.
+                VaultError::FactorRejected => ApiError::RecoveryRejected,
+                e => e.into(),
+            });
         }
     };
     let (vault, was_unlocked) = take_vault(inner, Some(fresh))?;
@@ -220,9 +225,9 @@ pub(crate) fn unlock_with_passphrase(
 ) -> Result<UnlockedVault, ApiError> {
     match LockedVault::open(&state.config.vault_path)?.unlock_at(passphrase, now as i64) {
         Ok(v) => Ok(v),
-        Err((_, VaultError::WrongPassword)) => {
+        Err((locked, VaultError::WrongPassword)) => {
             tracing::warn!("échec de connexion : phrase de passe incorrecte");
-            Err(ApiError::Unauthorized)
+            Err(ApiError::LoginFailed(locked.remaining_attempts()?))
         }
         Err((_, e)) => Err(e.into()),
     }
@@ -274,11 +279,12 @@ pub(crate) fn conclude_login(
         Ok(None) => {
             let failure = vault
                 .register_failure(now as i64)
-                .and_then(|()| vault.audit(ACTOR, AuditAction::LoginFailed, None));
+                .and_then(|()| vault.audit(ACTOR, AuditAction::LoginFailed, None))
+                .and_then(|()| vault.remaining_attempts());
             restore(inner, vault);
-            failure?;
+            let remaining = failure?;
             tracing::warn!("échec de connexion : second facteur invalide");
-            Err(ApiError::Unauthorized)
+            Err(ApiError::LoginFailed(remaining))
         }
         Err(e) => {
             restore(inner, vault);

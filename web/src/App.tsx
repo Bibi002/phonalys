@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, setApiHooks, type SessionInfo, type Status } from "./api";
+import { api, ApiError, setApiHooks, type SecurityStatus, type SessionInfo, type Status } from "./api";
 import { ErrorBox } from "./components";
 import { Login } from "./screens/Login";
 import { Patients } from "./screens/Patients";
 import { Security } from "./screens/Security";
 import { Setup } from "./screens/Setup";
+import { webauthnAvailable } from "./webauthn";
 
 type Phase = "loading" | "setup" | "login" | "open" | "offline";
 type Page = "patients" | "security";
@@ -73,8 +74,40 @@ export function App() {
         <SessionTimer idleSecs={idle} lastActivity={lastActivity} onExpired={() => setPhase("login")} />
         <LockButton onLocked={() => setPhase("login")} />
       </header>
-      <main>{page === "patients" ? <Patients /> : <Security />}</main>
+      <main>
+        {page === "patients" && <BiometricInvite onActivate={() => setPage("security")} />}
+        {page === "patients" ? <Patients /> : <Security />}
+      </main>
     </>
+  );
+}
+
+/** Après l'installation : propose d'activer la connexion quotidienne par biométrie. */
+export function BiometricInvite({ onActivate }: { onActivate: () => void }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (!webauthnAvailable()) return;
+    api<SecurityStatus>("GET", "/api/security")
+      .then((s) => setShow(s.passkeys === 0))
+      .catch(() => undefined);
+  }, []);
+  if (!show) return null;
+  return (
+    <section className="card invite">
+      <h2>Activez la connexion biométrique</h2>
+      <p>
+        Chaque jour, vous n'aurez plus qu'à taper votre phrase de passe puis à poser le doigt (ou utiliser le visage
+        ou Windows Hello). Plus besoin du code à 6 chiffres. La clé sert à chaque connexion, sans limite.
+      </p>
+      <div className="actions">
+        <button type="button" onClick={onActivate}>
+          Activer maintenant
+        </button>
+        <button type="button" className="ghost" onClick={() => setShow(false)}>
+          Plus tard
+        </button>
+      </div>
+    </section>
   );
 }
 
