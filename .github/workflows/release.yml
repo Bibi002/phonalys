@@ -144,7 +144,7 @@ jobs:
           name="phonalys-server-$version-$os-x64"
           mkdir -p "$name/web" out
           cp -r web/dist/. "$name/web/"
-          cp LICENSE docs/SECURITE.md "$name/"
+          cp LICENSE docs/SECURITE.md docs/INSTALLATION.md "$name/"
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp target/release/phonalys-server.exe "$name/"
             pwsh -NoProfile -Command "Compress-Archive -Path '$name' -DestinationPath 'out/$name.zip'"
@@ -172,6 +172,14 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # Les installateurs arrivent rangés par format (msi/, nsis/, deb/…) : on les remonte.
+      - name: Aplatir
+        working-directory: dist
+        run: |
+          find . -mindepth 2 -type f -exec mv -n -t . {} +
+          find . -mindepth 1 -type d -empty -delete
+          if [ -n "$(find . -mindepth 1 -type d)" ]; then echo "Fichiers en double" >&2; exit 1; fi
+          ls -l
       - name: Empreintes SHA-256
         working-directory: dist
         run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
