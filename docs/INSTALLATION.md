@@ -6,7 +6,7 @@ Guide destiné au praticien. Phonalys fonctionne entièrement chez vous : aucun 
 
 | Situation | À télécharger |
 |---|---|
-| **Un seul ordinateur** (Windows) | `Phonalys_0.1.0_x64-setup.exe` (ou `Phonalys_0.1.0_x64_fr-FR.msi` pour un déploiement géré) |
+| **Un seul ordinateur** (Windows) | `Phonalys_0.1.0_x64-setup.exe` (ou `Phonalys_0.1.0_x64_en-US.msi` pour un déploiement géré) |
 | **Un seul ordinateur** (Linux) | `.deb` (Debian, Ubuntu), `.rpm` (Fedora, openSUSE) ou `.AppImage` (toutes distributions) |
 | **Ordinateur et téléphones ou tablettes** | En plus : le serveur du cabinet, `phonalys-server-0.1.0-windows-x64.zip` ou `phonalys-server-0.1.0-linux-x64.tar.gz`, sur la machine qui reste allumée au cabinet |
 
