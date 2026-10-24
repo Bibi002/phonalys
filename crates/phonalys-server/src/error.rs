@@ -21,6 +21,11 @@ pub enum ApiError {
     RecoveryRejected,
     /// Après plusieurs échecs, la connexion en un geste est refusée.
     StepUpRequired,
+    /// Opération sensible : une réauthentification récente est exigée.
+    ReauthRequired,
+    /// Réauthentification refusée ; essais restants si la phrase de passe est en jeu.
+    /// Jamais 401 : la session reste ouverte.
+    ReauthFailed(Option<u32>),
     Internal,
 }
 
@@ -72,6 +77,24 @@ impl IntoResponse for ApiError {
                     if *n > 1 { "s" } else { "" }
                 ),
             ),
+            ApiError::ReauthRequired => (
+                StatusCode::FORBIDDEN,
+                "confirmez votre identité pour ouvrir les documents".to_owned(),
+            ),
+            ApiError::ReauthFailed(Some(0)) => (
+                StatusCode::FORBIDDEN,
+                "vérification refusée : la connexion est maintenant bloquée".to_owned(),
+            ),
+            ApiError::ReauthFailed(Some(n)) => (
+                StatusCode::FORBIDDEN,
+                format!(
+                    "vérification refusée : encore {n} essai{} avant le blocage",
+                    if *n > 1 { "s" } else { "" }
+                ),
+            ),
+            ApiError::ReauthFailed(None) => {
+                (StatusCode::FORBIDDEN, "vérification refusée".to_owned())
+            }
             ApiError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "erreur interne".to_owned(),
@@ -82,6 +105,8 @@ impl IntoResponse for ApiError {
             ApiError::LoginFailed(n) => body["remaining_attempts"] = (*n).into(),
             ApiError::TooManyAttempts(s) => body["retry_after_secs"] = (*s).into(),
             ApiError::StepUpRequired => body["step_up"] = true.into(),
+            ApiError::ReauthRequired => body["reauth"] = true.into(),
+            ApiError::ReauthFailed(Some(n)) => body["remaining_attempts"] = (*n).into(),
             _ => {}
         }
         let mut res = (status, Json(body)).into_response();

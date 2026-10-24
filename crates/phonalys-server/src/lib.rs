@@ -2,6 +2,7 @@
 
 mod api;
 mod backup;
+mod documents;
 mod error;
 mod passkey;
 mod records;
@@ -188,6 +189,26 @@ pub fn app(state: AppState) -> Router {
         .route("/api/backups", get(backup::status).post(backup::create))
         .route("/api/backups/{name}", get(backup::download))
         .route("/api/backups/{name}/verify", post(backup::verify))
+        .route(
+            "/api/documents",
+            get(documents::list)
+                .post(documents::upload)
+                .layer(DefaultBodyLimit::max(documents::MAX_DOCUMENT_BYTES)),
+        )
+        .route(
+            "/api/documents/{id}",
+            axum::routing::put(documents::rename).delete(documents::delete),
+        )
+        .route("/api/documents/{id}/content", get(documents::content))
+        .route("/api/reauth", post(documents::reauth))
+        .route(
+            "/api/reauth/passkey/start",
+            post(documents::reauth_passkey_start),
+        )
+        .route(
+            "/api/reauth/passkey/finish",
+            post(documents::reauth_passkey_finish),
+        )
         .route("/api/security", get(passkey::status))
         .route(
             "/api/security/policy",
@@ -237,10 +258,18 @@ pub fn app(state: AppState) -> Router {
             host_guard(allowed.clone(), req, next)
         }));
     for (name, value) in SECURITY_HEADERS {
-        router = router.layer(SetResponseHeaderLayer::overriding(
+        let (name, value) = (
             HeaderName::from_static(name),
             HeaderValue::from_static(value),
-        ));
+        );
+        // Les documents du coffre portent leur propre CSP (aucun script) et ne peuvent
+        // être encadrés que par l'application elle-même.
+        let own = name == header::CONTENT_SECURITY_POLICY || name == header::X_FRAME_OPTIONS;
+        router = router.layer(if own {
+            SetResponseHeaderLayer::if_not_present(name, value)
+        } else {
+            SetResponseHeaderLayer::overriding(name, value)
+        });
     }
     router.layer(SetResponseHeaderLayer::overriding(
         header::SERVER,

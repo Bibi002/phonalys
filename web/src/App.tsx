@@ -5,6 +5,7 @@ import { Agenda } from "./screens/Agenda";
 import { Audit } from "./screens/Audit";
 import { Backups } from "./screens/Backups";
 import { Bilans } from "./screens/Bilans";
+import { Documents } from "./screens/Documents";
 import { Exercises } from "./screens/Exercises";
 import { Home } from "./screens/Home";
 import { Login } from "./screens/Login";
@@ -15,7 +16,7 @@ import { Setup } from "./screens/Setup";
 import { webauthnAvailable } from "./webauthn";
 
 type Phase = "loading" | "setup" | "login" | "open" | "offline";
-export type Page = "home" | "patients" | "agenda" | "bilans" | "exercices" | "settings" | "backups" | "security" | "audit";
+export type Page = "home" | "patients" | "agenda" | "bilans" | "exercices" | "documents" | "settings" | "backups" | "security" | "audit";
 export type Navigate = (page: Page, patientId?: string) => void;
 
 const PAGES: readonly (readonly [Page, string])[] = [
@@ -24,6 +25,7 @@ const PAGES: readonly (readonly [Page, string])[] = [
   ["agenda", "Agenda"],
   ["bilans", "Bilans"],
   ["exercices", "Exercices"],
+  ["documents", "Documents"],
   ["settings", "Réglages"],
   ["backups", "Sauvegardes"],
   ["security", "Sécurité"],
@@ -135,6 +137,7 @@ export function App() {
         {page === "agenda" && <Agenda navigate={navigate} />}
         {page === "bilans" && <Bilans navigate={navigate} />}
         {page === "exercices" && <Exercises patientId={patientId} />}
+        {page === "documents" && <Documents />}
         {page === "settings" && <Settings onIdleChanged={setIdle} />}
         {page === "backups" && <Backups />}
         {page === "security" && <Security />}

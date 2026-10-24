@@ -22,7 +22,8 @@
 - [x] **WebAuthn / FIDO2 biométrique** : vérification de l'utilisateur obligatoire, ES256 et Ed25519, détection des clones, politique « clé obligatoire »
 - [x] Extension **PRF** : mode « lié au matériel », clé du coffre dépendant de la phrase de passe **et** de l'authentificateur ; codes de récupération cryptographiques (format de coffre v2, migration automatique depuis v1)
 - [ ] Option « biométrie stricte » : liste blanche d'AAGUID (YubiKey Bio…)
-- [ ] Sauvegardes chiffrées, restauration testée, migrations de schéma
+- [x] Sauvegardes chiffrées, test de restauration automatique, copie 3-2-1, restauration sur une nouvelle installation
+- [ ] Migrations de schéma
 - [ ] Appairage des appareils par QR code (avec l'empreinte du certificat)
 - [ ] Changement de phrase de passe et régénération des codes de récupération via l'API
 
@@ -39,7 +40,9 @@
 - [ ] Synchronisation en temps réel (WebSocket), fonctionnement hors ligne
 
 ## Phase 4 — Clinique
-- [ ] Dossiers patients, anamnèse structurée, consentements
+- [x] Dossiers patients, anamnèse structurée, prise en charge, séances, objectifs, agenda
+- [x] Coffre documentaire chiffré, ouverture soumise à une nouvelle authentification
+- [ ] Consentements signés
 - [ ] Mode passation : chronomètre, enregistrement audio local (avec consentement), cotation item par item, affichage pour l'enfant sur un second écran
 - [ ] Profils graphiques (z-scores par domaine), courbes d'évolution, RCI
 - [ ] Éditeur de batteries, import et export JSON signés

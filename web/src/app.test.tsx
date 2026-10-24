@@ -23,6 +23,9 @@ function fakeServer() {
       if (url === "/api/security")
         return json({ require_passkey: false, hardware_bound: false, passkeys: 0, bound_passkeys: 0, quick_passkeys: 0, recovery_codes_remaining: 10 });
       if (url === "/api/passkeys") return json([]);
+      if (url.startsWith("/api/documents"))
+        return json([{ id: "d1", patient_id: PATIENT.id, name: "Prescription.pdf", mime: "application/pdf", size: 2048, category: "Prescription", created_at: 1761400000 }]);
+      if (url === "/api/reauth") return json({ elevated_secs: 300 });
       if (url === "/api/settings") return json({ idle_timeout_minutes: 15, practitioner: {}, auto_backup: true });
       if (url === "/api/backups") return json({ dir: "C:\\data", extra_dir: null, auto: true, last: null, files: [] });
       if (url === "/api/audit") return json({ verified: true, total: 1, entries: [{ seq: 0, at: "2026-10-25T10:00:00Z", action: "login", target: null }] });
@@ -44,6 +47,7 @@ describe("application", () => {
       ["Réglages", /Délai d'inactivité/],
       ["Sécurité", /Clés biométriques et de sécurité/],
       ["Journal", /Intégrité du journal vérifiée/],
+      ["Documents", /Coffre documentaire/],
       ["Sauvegardes", /Pas de copie sur un second support/],
       ["Accueil", /Aujourd'hui/],
     ];
@@ -58,9 +62,9 @@ describe("application", () => {
     render(<App />);
     fireEvent.click(within(await screen.findByRole("navigation")).getByRole("button", { name: "Patients" }));
     fireEvent.click(await screen.findByText("TEST Léa"));
-    for (const tab of ["Anamnèse", "Prise en charge", "Séances", "Bilans", "Objectifs", "Exercices", "Identité"]) {
+    for (const tab of ["Anamnèse", "Prise en charge", "Séances", "Bilans", "Objectifs", "Exercices", "Documents", "Identité"]) {
       fireEvent.click(await screen.findByRole("tab", { name: tab }));
-      await screen.findByRole("heading", { level: 2 });
+      expect((await screen.findAllByRole("heading", { level: 2 })).length).toBeGreaterThan(0);
     }
   });
 
@@ -75,6 +79,41 @@ describe("application", () => {
     screen.getByRole("button", { name: "Ça rime" });
   });
 });
+describe("coffre documentaire", () => {
+  it("demande de confirmer son identité avant d'afficher un document", async () => {
+    fakeServer();
+    render(<App />);
+    fireEvent.click(within(await screen.findByRole("navigation")).getByRole("button", { name: "Documents" }));
+    await screen.findByText("Prescription.pdf");
+    expect(screen.queryByRole("button", { name: "Aperçu" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ouvrir les documents" }));
+    fireEvent.change(await screen.findByLabelText("Phrase de passe"), { target: { value: "girafe tambour lumière escalier" } });
+    fireEvent.change(screen.getByLabelText("Code à 6 chiffres"), { target: { value: "123 456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmer" }));
+    await screen.findByText(/Ouverts encore/);
+    fireEvent.click(screen.getByRole("button", { name: "Aperçu" }));
+    const frame = await screen.findByTitle("Prescription.pdf");
+    expect(frame.getAttribute("src")).toBe("/api/documents/d1/content");
+    const calls = (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls;
+    const reauth = calls.find(([u]) => u === "/api/reauth");
+    expect(JSON.parse(String(reauth?.[1]?.body))).toEqual({ passphrase: "girafe tambour lumière escalier", code: "123456" });
+  });
+
+  it("refuse un fichier trop volumineux sans l'envoyer", async () => {
+    const { uploadDocument, viewerKind, MAX_DOCUMENT_BYTES } = await import("./screens/Documents");
+    expect(viewerKind("application/pdf")).toBe("pdf");
+    expect(viewerKind("image/jpeg")).toBe("image");
+    expect(viewerKind("application/vnd.oasis.opendocument.text")).toBeNull();
+    const f = vi.fn(async (_u: string, _i?: RequestInit) => json({ id: "d2", name: "a.pdf", mime: "application/pdf", size: 3, category: "", created_at: 0 }, 201));
+    vi.stubGlobal("fetch", f);
+    await uploadDocument(new Blob(["%PDF"]), "Compte rendu.pdf", "Courrier", "p1");
+    const [url, init] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/documents?name=Compte+rendu.pdf&category=Courrier&patient_id=p1");
+    expect((init.headers as Record<string, string>)["x-phonalys-request"]).toBe("1");
+    expect(MAX_DOCUMENT_BYTES).toBe(20 * 1024 * 1024);
+  });
+});
+
 describe("restauration", () => {
   it("envoie le fichier brut avec le jeton d'installation et l'en-tête anti-CSRF", async () => {
     const f = vi.fn(async (_u: string, _i?: RequestInit) => new Response(null, { status: 204 }));

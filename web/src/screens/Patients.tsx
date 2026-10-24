@@ -3,6 +3,7 @@ import { api, records } from "../api";
 import type { Navigate } from "../App";
 import { ConfirmButton, Empty, ErrorBox, Field, Select, Tabs, TextArea, useAction } from "../components";
 import { exerciseTitle } from "../exercises";
+import { DocumentsPanel } from "./Documents";
 import { usePatients, useRecords } from "../hooks";
 import {
   age,
@@ -146,7 +147,7 @@ function NewPatient({ onCreated, onCancel }: { onCreated: (id: string) => void; 
   );
 }
 
-type FileTab = "identite" | "anamnese" | "pec" | "seances" | "bilans" | "objectifs" | "exercices";
+type FileTab = "identite" | "anamnese" | "pec" | "seances" | "bilans" | "objectifs" | "exercices" | "documents";
 const FILE_TABS: readonly (readonly [FileTab, string])[] = [
   ["identite", "Identité"],
   ["anamnese", "Anamnèse"],
@@ -155,6 +156,7 @@ const FILE_TABS: readonly (readonly [FileTab, string])[] = [
   ["bilans", "Bilans"],
   ["objectifs", "Objectifs"],
   ["exercices", "Exercices"],
+  ["documents", "Documents"],
 ];
 
 function PatientFile(props: {
@@ -189,6 +191,7 @@ function PatientFile(props: {
       {tab === "bilans" && <PatientBilans patient={patient} />}
       {tab === "objectifs" && <PatientObjectifs patient={patient} />}
       {tab === "exercices" && <PatientExercices patient={patient} navigate={props.navigate} />}
+      {tab === "documents" && <DocumentsPanel patientId={patient.id} />}
     </>
   );
 }

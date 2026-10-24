@@ -52,6 +52,8 @@ pub enum AuditAction {
     RecordUpdated,
     RecordErased,
     AuditViewed,
+    /// Nouvelle authentification avant une opération sensible (documents).
+    Reauthenticated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

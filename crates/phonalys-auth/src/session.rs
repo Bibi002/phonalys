@@ -28,6 +28,8 @@ impl Default for SessionConfig {
 struct Session {
     created_at: u64,
     last_seen: u64,
+    /// Fin de la période de confiance renforcée (nouvelle authentification récente).
+    elevated_until: u64,
 }
 
 #[derive(Debug, Default)]
@@ -63,6 +65,7 @@ impl SessionStore {
             Session {
                 created_at: now,
                 last_seen: now,
+                elevated_until: 0,
             },
         );
         URL_SAFE_NO_PAD.encode(raw)
@@ -84,6 +87,33 @@ impl SessionStore {
         }
         session.last_seen = now;
         true
+    }
+
+    /// Après une nouvelle authentification forte : opérations sensibles permises
+    /// jusqu'à `until`.
+    pub fn elevate(&mut self, token: &str, until: u64) -> bool {
+        let Some(key) = Self::key(token) else {
+            return false;
+        };
+        match self.sessions.get_mut(&key) {
+            Some(s) => {
+                s.elevated_until = until;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// La session a-t-elle été réauthentifiée récemment ?
+    pub fn is_elevated(&self, token: &str, now: u64) -> bool {
+        self.elevation_remaining(token, now) > 0
+    }
+
+    /// Secondes restantes de la période de confiance renforcée (0 si aucune).
+    pub fn elevation_remaining(&self, token: &str, now: u64) -> u64 {
+        Self::key(token)
+            .and_then(|k| self.sessions.get(&k))
+            .map_or(0, |s| s.elevated_until.saturating_sub(now))
     }
 
     pub fn revoke(&mut self, token: &str) {
@@ -153,6 +183,19 @@ mod tests {
         assert!(!s.touch(&URL_SAFE_NO_PAD.encode([0u8; 32]), 1));
         s.revoke(&t);
         assert!(!s.touch(&t, 1));
+    }
+
+    #[test]
+    fn elevation_expires_and_is_per_session() {
+        let mut s = store();
+        let a = s.create(0);
+        let b = s.create(0);
+        assert!(!s.is_elevated(&a, 1));
+        assert!(s.elevate(&a, 100));
+        assert!(s.is_elevated(&a, 99));
+        assert!(!s.is_elevated(&a, 100));
+        assert!(!s.is_elevated(&b, 50));
+        assert!(!s.elevate("faux", 100));
     }
 
     #[test]

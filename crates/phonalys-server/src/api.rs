@@ -30,7 +30,7 @@ pub(crate) async fn blocking<T: Send + 'static>(
         .map_err(|_| ApiError::Internal)?
 }
 
-fn session_token(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn session_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get_all(header::COOKIE)
         .iter()
@@ -181,7 +181,7 @@ pub(crate) fn recovery_secrets(codes: &[String]) -> Vec<Vec<u8>> {
 }
 
 /// Vérifie un code TOTP ; renvoie l'action d'audit si valide.
-fn check_totp(
+pub(crate) fn check_totp(
     vault: &UnlockedVault,
     code: &str,
     now: u64,
@@ -356,11 +356,20 @@ fn expire_cookie(mut res: Response) -> Response {
 #[derive(Debug, Serialize)]
 pub struct SessionInfo {
     idle_timeout_secs: u64,
+    /// Nouvelle authentification récente : documents du coffre consultables.
+    elevated: bool,
+    /// Secondes restantes avant que les documents ne se referment.
+    elevated_secs: u64,
 }
 
-pub async fn session(State(state): State<AppState>) -> Json<SessionInfo> {
+pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<SessionInfo> {
+    let inner = state.lock_inner();
+    let elevated_secs =
+        session_token(&headers).map_or(0, |t| inner.sessions.elevation_remaining(&t, now()));
     Json(SessionInfo {
-        idle_timeout_secs: state.lock_inner().sessions.config().idle_timeout_secs,
+        idle_timeout_secs: inner.sessions.config().idle_timeout_secs,
+        elevated: elevated_secs > 0,
+        elevated_secs,
     })
 }
 
@@ -465,6 +474,7 @@ pub async fn delete_patient(
         // Le dossier doit exister avant d'effacer quoi que ce soit.
         let _: Value = vault.get_json(PATIENT, &id)?;
         crate::records::erase_patient_records(vault, &id)?;
+        crate::documents::erase_patient_documents(vault, &id)?;
         vault.delete(PATIENT, &id)?;
         vault.audit(ACTOR, AuditAction::PatientErased, Some(&id))?;
         Ok(StatusCode::NO_CONTENT)

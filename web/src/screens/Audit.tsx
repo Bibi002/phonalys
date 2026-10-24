@@ -27,9 +27,13 @@ const LABELS: Record<string, string> = {
   record_erased: "Élément effacé",
   settings_changed: "Réglages modifiés",
   audit_viewed: "Journal consulté",
+  document_imported: "Document importé",
+  document_opened: "Document ouvert",
+  reauthenticated: "Identité confirmée (documents)",
+  export: "Sauvegarde",
 };
 
-const KINDS: Record<string, string> = { seance: "séance", bilan: "bilan", objectif: "objectif", exercice: "exercice" };
+const KINDS: Record<string, string> = { seance: "séance", bilan: "bilan", objectif: "objectif", exercice: "exercice", document: "document" };
 
 function describeTarget(t: string | null): string {
   if (!t) return "";

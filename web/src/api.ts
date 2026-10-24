@@ -5,6 +5,8 @@ export class ApiError extends Error {
     readonly status: number,
     message: string,
     readonly retryAfter?: number,
+    /** Le serveur demande de confirmer son identité (documents du coffre). */
+    readonly reauth = false,
   ) {
     super(message);
     this.name = "ApiError";
@@ -34,15 +36,17 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
 
   if (!res.ok) {
     let message = `erreur ${res.status}`;
+    let reauth = false;
     try {
-      const data = (await res.json()) as { error?: unknown };
+      const data = (await res.json()) as { error?: unknown; reauth?: unknown };
       if (typeof data.error === "string") message = data.error;
+      reauth = data.reauth === true;
     } catch {
       // réponse sans JSON
     }
     const retry = Number(res.headers.get("retry-after"));
     if (res.status === 401 && !PUBLIC_ROUTES.some((r) => path.startsWith(r))) onUnauthorized?.();
-    throw new ApiError(res.status, message, Number.isFinite(retry) && retry > 0 ? retry : undefined);
+    throw new ApiError(res.status, message, Number.isFinite(retry) && retry > 0 ? retry : undefined, reauth);
   }
   onActivity?.();
   if (res.status === 204) return undefined as T;
@@ -68,6 +72,9 @@ export interface SetupResult {
 
 export interface SessionInfo {
   idle_timeout_secs: number;
+  /** Identité confirmée récemment : les documents du coffre sont consultables. */
+  elevated?: boolean;
+  elevated_secs?: number;
 }
 
 export type { Patient } from "./model";

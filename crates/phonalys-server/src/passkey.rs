@@ -60,14 +60,17 @@ fn save_policy(vault: &UnlockedVault, policy: SecurityPolicy) -> Result<(), ApiE
     Ok(vault.put_secret(POLICY, &serde_json::to_vec(&policy)?)?)
 }
 
-fn credentials(vault: &UnlockedVault) -> Result<Vec<StoredCredential>, ApiError> {
+pub(crate) fn credentials(vault: &UnlockedVault) -> Result<Vec<StoredCredential>, ApiError> {
     Ok(match vault.get_secret(CREDENTIALS)? {
         Some(bytes) => serde_json::from_slice(&bytes)?,
         None => Vec::new(),
     })
 }
 
-fn save_credentials(vault: &UnlockedVault, creds: &[StoredCredential]) -> Result<(), ApiError> {
+pub(crate) fn save_credentials(
+    vault: &UnlockedVault,
+    creds: &[StoredCredential],
+) -> Result<(), ApiError> {
     Ok(vault.put_secret(CREDENTIALS, &serde_json::to_vec(creds)?)?)
 }
 

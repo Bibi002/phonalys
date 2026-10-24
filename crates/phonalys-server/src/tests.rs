@@ -1821,3 +1821,253 @@ async fn extra_backup_dir_and_daily_automatic_backup() {
     backup::auto_backup(&h.state, t0 + 3 * backup::AUTO_INTERVAL_SECS);
     assert_eq!(std::fs::read_dir(usb.path()).unwrap().count(), 2);
 }
+
+async fn get_full(h: &Harness, uri: &str, cookie: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
+    let req = Request::builder()
+        .uri(uri)
+        .header("host", "localhost:8443")
+        .header("cookie", cookie)
+        .body(Body::empty())
+        .unwrap();
+    let res = app(h.state.clone()).oneshot(req).await.unwrap();
+    let (status, headers) = (res.status(), res.headers().clone());
+    let bytes = to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
+    (status, headers, bytes)
+}
+
+#[tokio::test]
+async fn documents_are_encrypted_typed_and_need_a_fresh_reauthentication() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    // Trois pas TOTP consécutifs : connexion, réauthentification, second appareil.
+    let now = state::now() - 30;
+    let cookie = h.login_at(&totp, now).await;
+    let c = Some(cookie.as_str());
+    let (_, _, p) = h
+        .call("POST", "/api/patients", Some(json!({ "nom": "Docs" })), c)
+        .await;
+    let pid = p["id"].as_str().unwrap().to_owned();
+
+    let pdf = b"%PDF-1.7\nCompte rendu ORL".to_vec();
+    let (s, body) = raw(
+        &h,
+        "POST",
+        &format!("/api/documents?name=Compte%20rendu%20ORL.pdf&category=Courrier&patient_id={pid}"),
+        &[("content-type", "application/octet-stream")],
+        pdf.clone(),
+        c,
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let doc: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(doc["mime"], "application/pdf");
+    assert_eq!(doc["size"], pdf.len());
+    let id = doc["id"].as_str().unwrap().to_owned();
+
+    // Un fichier HTML déguisé en PDF, ou un exécutable, est refusé.
+    for (name, bytes) in [
+        ("faux.pdf", b"<html><script>".to_vec()),
+        ("a.exe", b"MZ\x90\0".to_vec()),
+    ] {
+        let (s, _) = raw(
+            &h,
+            "POST",
+            &format!("/api/documents?name={name}"),
+            &[],
+            bytes,
+            c,
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+    // Patient inexistant : refusé.
+    let (s, _) = raw(
+        &h,
+        "POST",
+        "/api/documents?name=a.pdf&patient_id=00000000-0000-4000-8000-000000000000",
+        &[],
+        pdf.clone(),
+        c,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    let (_, _, list) = h
+        .call("GET", &format!("/api/documents?patient_id={pid}"), None, c)
+        .await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(list[0]["name"], "Compte rendu ORL.pdf");
+
+    // Le contenu n'apparaît pas en clair dans le fichier du coffre.
+    let raw_vault = std::fs::read(&h.state.config.vault_path).unwrap();
+    assert!(!raw_vault
+        .windows(10)
+        .any(|w| w == b"rendu ORL\0" || w == b"Compte ren"));
+
+    // Session ouverte mais pas de réauthentification récente : refus, sans fermer la session.
+    let content = format!("/api/documents/{id}/content");
+    let (s, _, body) = get_full(&h, &content, &cookie).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap()["reauth"],
+        true
+    );
+    let (s, _, _) = h
+        .call("DELETE", &format!("/api/documents/{id}"), None, c)
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // Mauvais code : refus compté, sans 401 (l'interface resterait connectée).
+    let (s, _, body) = h
+        .call(
+            "POST",
+            "/api/reauth",
+            Some(json!({ "passphrase": PASSPHRASE, "code": "000000" })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["remaining_attempts"], 3);
+    let (s, _, body) = h
+        .call(
+            "POST",
+            "/api/reauth",
+            Some(json!({ "passphrase": "mauvaise phrase", "code": totp.code_at(now + 30) })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+
+    let (s, _, body) = h
+        .call(
+            "POST",
+            "/api/reauth",
+            Some(json!({ "passphrase": PASSPHRASE, "code": totp.code_at(now + 30) })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (_, _, info) = h.call("GET", "/api/session", None, c).await;
+    assert_eq!(info["elevated"], true);
+
+    let (s, headers, bytes) = get_full(&h, &content, &cookie).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(bytes, pdf);
+    assert_eq!(headers["content-type"], "application/pdf");
+    assert!(headers["content-disposition"]
+        .to_str()
+        .unwrap()
+        .starts_with("inline;"));
+    let csp = headers["content-security-policy"].to_str().unwrap();
+    assert!(csp.contains("default-src 'none'"), "{csp}");
+    assert!(csp.contains("frame-ancestors 'self'"), "{csp}");
+    assert_eq!(headers["x-frame-options"], "SAMEORIGIN");
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    assert_eq!(headers["cache-control"], "no-store");
+    let (_, headers, _) = get_full(&h, &format!("{content}?download=1"), &cookie).await;
+    assert!(headers["content-disposition"]
+        .to_str()
+        .unwrap()
+        .starts_with("attachment;"));
+    // Les autres réponses gardent la CSP de l'application.
+    let (_, headers, _) = get_full(&h, "/api/documents", &cookie).await;
+    assert!(headers["content-security-policy"]
+        .to_str()
+        .unwrap()
+        .contains("script-src 'self'"));
+    assert_eq!(headers["x-frame-options"], "DENY");
+
+    // L'élévation est propre à la session : un autre appareil doit se réauthentifier.
+    let other = h.login_at(&totp, now + 60).await;
+    let (s, _, _) = get_full(&h, &content, &other).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // Effacer le patient efface ses documents.
+    let (s, _, _) = h
+        .call("DELETE", &format!("/api/patients/{pid}"), None, c)
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, _, list) = h.call("GET", "/api/documents", None, c).await;
+    assert_eq!(list, json!([]));
+    let (s, _, _) = get_full(&h, &content, &cookie).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (_, _, audit) = h.call("GET", "/api/audit", None, c).await;
+    let actions: Vec<&str> = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["action"].as_str().unwrap())
+        .collect();
+    for a in [
+        "document_imported",
+        "document_opened",
+        "reauthenticated",
+        "record_erased",
+    ] {
+        assert!(actions.contains(&a), "{a} absent de {actions:?}");
+    }
+}
+
+#[tokio::test]
+async fn reauthentication_with_a_biometric_key() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let c = Some(cookie.as_str());
+    let mut device = h.register_passkey(&cookie, Algorithm::Es256).await;
+
+    let (s, _, options) = h.call("POST", "/api/reauth/passkey/start", None, c).await;
+    assert_eq!(s, StatusCode::OK, "{options}");
+    assert_eq!(options["userVerification"], "required");
+    // Signature d'un autre site : refusée, la session reste ouverte.
+    let bad = device.authenticate(
+        RP_ID,
+        "https://phishing.example",
+        options["challenge"].as_str().unwrap(),
+    );
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/reauth/passkey/finish",
+            Some(json!({ "response": bad })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    let (_, _, options) = h.call("POST", "/api/reauth/passkey/start", None, c).await;
+    let good = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+    // Le défi d'une session ne sert pas à une autre.
+    let other = h.login_at(&totp, state::now() + 30).await;
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/reauth/passkey/finish",
+            Some(json!({ "response": good })),
+            Some(other.as_str()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    let (_, _, options) = h.call("POST", "/api/reauth/passkey/start", None, c).await;
+    let good = device.authenticate(RP_ID, ORIGIN, options["challenge"].as_str().unwrap());
+    let (s, _, body) = h
+        .call(
+            "POST",
+            "/api/reauth/passkey/finish",
+            Some(json!({ "response": good })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (_, _, info) = h.call("GET", "/api/session", None, c).await;
+    assert_eq!(info["elevated"], true);
+    let (_, _, info) = h
+        .call("GET", "/api/session", None, Some(other.as_str()))
+        .await;
+    assert_eq!(info["elevated"], false);
+}

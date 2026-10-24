@@ -75,6 +75,14 @@ pub(crate) struct PendingQuick {
     pub expires_at: u64,
 }
 
+/// Réauthentification par clé en cours, pour une session donnée.
+#[derive(Debug)]
+pub(crate) struct PendingReauth {
+    pub challenge: Challenge,
+    pub session: zeroize::Zeroizing<String>,
+    pub expires_at: u64,
+}
+
 /// Nouveau défi aléatoire.
 pub(crate) fn new_challenge() -> Challenge {
     let mut raw = [0u8; 32];
@@ -98,6 +106,7 @@ pub(crate) struct Inner {
     pub pending_registration: Option<PendingRegistration>,
     pub pending_bind: Option<PendingBind>,
     pub pending_quick: Option<PendingQuick>,
+    pub pending_reauth: Option<PendingReauth>,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +134,7 @@ impl AppState {
                 pending_registration: None,
                 pending_bind: None,
                 pending_quick: None,
+                pending_reauth: None,
             })),
             config: Arc::new(config),
         };
@@ -178,6 +188,13 @@ impl AppState {
             .is_some_and(|p| now > p.expires_at)
         {
             inner.pending_quick = None;
+        }
+        if inner
+            .pending_reauth
+            .as_ref()
+            .is_some_and(|p| now > p.expires_at)
+        {
+            inner.pending_reauth = None;
         }
         if !inner.sessions.purge(now) {
             if let Phase::Unlocked(mut vault) = std::mem::replace(&mut inner.phase, Phase::Locked) {
