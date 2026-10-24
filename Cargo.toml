@@ -41,7 +41,7 @@ data-encoding = "2.6"
 zxcvbn = "3"
 axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
-rcgen = "0.13"
+rcgen = "0.14"
 tokio-rustls = { version = "0.26", default-features = false }
 
 argon2 = { version = "0.5", features = ["std"] }
