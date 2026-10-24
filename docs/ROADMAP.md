@@ -27,9 +27,12 @@
 - [ ] Changement de phrase de passe et régénération des codes de récupération via l'API
 
 ## Phase 3 — Interfaces
-- [ ] Interface React/TypeScript, accessible (WCAG 2.2 AA), en français (néerlandais et allemand prévus pour la Belgique)
+- [x] Interface React/TypeScript servie par le serveur : installation (QR code TOTP généré localement), connexion (clé biométrique avec PRF, TOTP, récupération), patients, sécurité (clés, liaison, politique, mode lié), compte à rebours du verrouillage, verrouillage immédiat
+- [x] Compatible avec la CSP stricte (aucun script ni style en ligne, contrôlé à chaque compilation)
+- [x] PWA : manifest et service worker qui ne met **jamais** en cache les données de l'API
+- [ ] Audit d'accessibilité WCAG 2.2 AA ; traductions néerlandaise et allemande
+- [ ] Icônes PNG pour iOS (apple-touch-icon)
 - [ ] Application de bureau Tauri 2 : installateurs MSI signés (Windows), .deb, .rpm et AppImage (Linux)
-- [ ] PWA installable sur iPhone et Android
 - [ ] Synchronisation en temps réel (WebSocket), fonctionnement hors ligne
 
 ## Phase 4 — Clinique

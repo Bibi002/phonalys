@@ -76,7 +76,20 @@ pub struct SetupRequest {
 pub struct SetupResponse {
     totp_uri: String,
     totp_secret: String,
+    /// QR code du `totp_uri`, en SVG, généré sur le serveur : le secret ne transite par
+    /// aucun service tiers.
+    totp_qr_svg: String,
     recovery_codes: Vec<String>,
+}
+
+fn qr_svg(data: &str) -> Result<String, ApiError> {
+    let code = qrcode::QrCode::with_error_correction_level(data, qrcode::EcLevel::M)
+        .map_err(|_| ApiError::Internal)?;
+    Ok(code
+        .render::<qrcode::render::svg::Color<'_>>()
+        .min_dimensions(240, 240)
+        .quiet_zone(true)
+        .build())
 }
 
 pub async fn setup(
@@ -119,10 +132,12 @@ pub async fn setup(
         inner.setup_token = None;
         tracing::info!("installation terminée");
 
+        let totp_uri = totp.provisioning_uri("Phonalys", name.unwrap_or("cabinet"));
         Ok((
             StatusCode::CREATED,
             Json(SetupResponse {
-                totp_uri: totp.provisioning_uri("Phonalys", name.unwrap_or("cabinet")),
+                totp_qr_svg: qr_svg(&totp_uri)?,
+                totp_uri,
                 totp_secret: totp.secret_base32(),
                 recovery_codes: plain_codes,
             }),
@@ -395,6 +410,24 @@ pub async fn get_patient(
         let value: Value = vault.get_json(PATIENT, &id)?;
         vault.audit(ACTOR, AuditAction::PatientViewed, Some(&id))?;
         Ok(Json(value))
+    })
+}
+
+pub async fn update_patient(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(data): Json<Value>,
+) -> Result<StatusCode, ApiError> {
+    let id = parse_id(&id)?;
+    if !data.is_object() {
+        return Err(ApiError::BadRequest("objet JSON attendu".into()));
+    }
+    state.with_vault(|vault| {
+        // Un identifiant inconnu ne crée pas de dossier.
+        let _: Value = vault.get_json(PATIENT, &id)?;
+        vault.put_json(PATIENT, &id, &data)?;
+        vault.audit(ACTOR, AuditAction::PatientUpdated, Some(&id))?;
+        Ok(StatusCode::NO_CONTENT)
     })
 }
 

@@ -42,6 +42,27 @@ fn relying_party(bind: SocketAddr, insecure_http: bool) -> Result<RelyingParty, 
     })
 }
 
+/// Application web : `PHONALYS_WEB_DIR`, sinon le dossier `web` à côté de l'exécutable,
+/// sinon `web/dist` (développement). Sans dossier valide, seule l'API est servie.
+fn web_dir() -> Option<PathBuf> {
+    let candidates = [
+        std::env::var_os("PHONALYS_WEB_DIR").map(PathBuf::from),
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|d| d.join("web"))),
+        Some(PathBuf::from("web/dist")),
+    ];
+    let found = candidates
+        .into_iter()
+        .flatten()
+        .find(|d| d.join("index.html").is_file());
+    match &found {
+        Some(dir) => tracing::info!(dossier = %dir.display(), "application web"),
+        None => tracing::warn!("application web introuvable : API seule (compilez `web/`)"),
+    }
+    found
+}
+
 fn create_private_dir(dir: &PathBuf) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     #[cfg(unix)]
@@ -76,6 +97,7 @@ async fn main() -> Result<(), tls::BoxError> {
         kdf: KdfParams::default(),
         sessions: SessionConfig::default(),
         relying_party,
+        web_dir: web_dir(),
     });
     if let Some(token) = setup_token {
         // Écrit sur la console uniquement, jamais dans les journaux persistants.

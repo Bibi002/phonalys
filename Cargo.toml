@@ -61,7 +61,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
 axum = "0.8"
 tower = "0.5"
-tower-http = { version = "0.6", features = ["set-header", "limit", "trace"] }
+tower-http = { version = "0.6", features = ["set-header", "limit", "trace", "fs"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 proptest = "1"

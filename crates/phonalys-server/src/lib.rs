@@ -12,11 +12,13 @@ use axum::extract::Request;
 use axum::http::{header, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{any, get, post};
 use axum::{Json, Router};
+use error::ApiError;
 use serde::Serialize;
 use std::time::Duration;
 use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 /// Taille maximale d'une requête (documents importés compris).
@@ -97,7 +99,9 @@ pub fn app(state: AppState) -> Router {
         )
         .route(
             "/api/patients/{id}",
-            get(api::get_patient).delete(api::delete_patient),
+            get(api::get_patient)
+                .put(api::update_patient)
+                .delete(api::delete_patient),
         )
         .route("/api/passkeys", get(passkey::list))
         .route(
@@ -122,15 +126,27 @@ pub fn app(state: AppState) -> Router {
             api::require_session,
         ));
 
-    let mut router = Router::new()
+    let web_dir = state.config.web_dir.clone();
+    let api = Router::new()
         .route("/api/health", get(health))
         .route("/api/status", get(api::status))
         .route("/api/setup", post(api::setup))
         .route("/api/login", post(api::login))
         .route("/api/login/passkey/start", post(passkey::login_start))
         .route("/api/login/passkey/finish", post(passkey::login_finish))
+        // Une route d'API inconnue ne doit jamais renvoyer la page de l'application.
+        .route("/api/{*rest}", any(|| async { ApiError::NotFound }))
         .merge(protected)
-        .with_state(state)
+        .with_state(state);
+
+    // Application web : fichiers statiques, et `index.html` pour les routes de l'interface.
+    let api = match web_dir {
+        Some(dir) => api
+            .fallback_service(ServeDir::new(&dir).fallback(ServeFile::new(dir.join("index.html")))),
+        None => api,
+    };
+
+    let mut router = api
         .layer(middleware::from_fn(csrf_guard))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES));
     for (name, value) in SECURITY_HEADERS {

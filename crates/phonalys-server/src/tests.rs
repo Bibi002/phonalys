@@ -22,7 +22,16 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
+        let web = dir.path().join("web");
+        std::fs::create_dir_all(web.join("assets")).unwrap();
+        std::fs::write(
+            web.join("index.html"),
+            "<!doctype html><title>Phonalys</title>",
+        )
+        .unwrap();
+        std::fs::write(web.join("assets/app.js"), "console.log(1)").unwrap();
         let (state, token) = AppState::new(Config {
+            web_dir: Some(web),
             vault_path: dir.path().join("cabinet.phonalys-vault"),
             kdf: KdfParams::insecure_for_tests(),
             sessions: SessionConfig::default(),
@@ -995,4 +1004,122 @@ async fn binding_requires_the_passphrase() {
     assert_eq!(s, StatusCode::UNAUTHORIZED);
     let (_, _, list) = h.call("GET", "/api/passkeys", None, Some(&cookie)).await;
     assert_eq!(list[0]["bound"], false);
+}
+
+// --- Application web ---------------------------------------------------------------------
+
+async fn raw_get(h: &Harness, uri: &str) -> (StatusCode, HeaderMap, String) {
+    let req = Request::builder()
+        .uri(uri)
+        .header("host", "localhost:8443")
+        .body(Body::empty())
+        .unwrap();
+    let res = app(h.state.clone()).oneshot(req).await.unwrap();
+    let (status, headers) = (res.status(), res.headers().clone());
+    let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    (
+        status,
+        headers,
+        String::from_utf8_lossy(&bytes).into_owned(),
+    )
+}
+
+#[tokio::test]
+async fn web_app_is_served_with_spa_fallback_and_security_headers() {
+    let h = Harness::new();
+    let (s, headers, body) = raw_get(&h, "/").await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(body.contains("Phonalys"));
+    assert!(headers["content-security-policy"]
+        .to_str()
+        .unwrap()
+        .contains("script-src 'self'"));
+
+    let (s, headers, body) = raw_get(&h, "/assets/app.js").await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(headers["content-type"]
+        .to_str()
+        .unwrap()
+        .contains("javascript"));
+    assert_eq!(body, "console.log(1)");
+
+    // Route de l'interface : la page de l'application.
+    let (s, _, body) = raw_get(&h, "/patients/123").await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(body.contains("Phonalys"));
+
+    // Route d'API inconnue : 404 JSON, jamais la page.
+    let (s, _, body) = raw_get(&h, "/api/inexistant").await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    assert!(!body.contains("doctype"));
+
+    // Pas de sortie du dossier web.
+    let (s, _, body) = raw_get(&h, "/../cabinet.phonalys-vault").await;
+    assert!(s == StatusCode::OK || s == StatusCode::NOT_FOUND || s == StatusCode::BAD_REQUEST);
+    assert!(!body.contains("SQLite"));
+}
+
+#[tokio::test]
+async fn setup_returns_a_server_side_qr_code() {
+    let h = Harness::new();
+    let (status, _, body) = h
+        .call(
+            "POST",
+            "/api/setup",
+            Some(json!({ "setup_token": h.setup_token, "passphrase": PASSPHRASE })),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let svg = body["totp_qr_svg"].as_str().unwrap();
+    assert!(svg.contains("<svg") && !svg.contains("<script"));
+}
+
+#[tokio::test]
+async fn patient_can_be_updated_but_not_created_by_put() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let (_, _, created) = h
+        .call(
+            "POST",
+            "/api/patients",
+            Some(json!({ "nom": "Durand" })),
+            Some(&cookie),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap();
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            &format!("/api/patients/{id}"),
+            Some(json!({ "nom": "Dupont" })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, _, p) = h
+        .call("GET", &format!("/api/patients/{id}"), None, Some(&cookie))
+        .await;
+    assert_eq!(p["nom"], "Dupont");
+
+    let unknown = "00000000-0000-4000-8000-000000000000";
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            &format!("/api/patients/{unknown}"),
+            Some(json!({ "nom": "X" })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            &format!("/api/patients/{id}"),
+            Some(json!({ "nom": "X" })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
 }

@@ -25,17 +25,18 @@ Phonalys s'adresse aux logopèdes indépendants. Le praticien fait passer ses é
 | `crates/phonalys-vault` | Coffre SQLite chiffré par enregistrement, délai après échecs, audit persistant | ✅ testé |
 | `crates/phonalys-auth` | Politique de phrase de passe, TOTP (RFC 6238), codes de récupération, sessions | ✅ testé |
 | `crates/phonalys-webauthn` | Clés biométriques et de sécurité (WebAuthn/FIDO2), vérifiées sans OpenSSL | ✅ testé |
-| `crates/phonalys-server` | Serveur TLS 1.3 : installation, connexion 2FA, verrouillage auto, API patients | ✅ testé (web/PWA en phase 3) |
-| `apps/desktop` | Application Tauri (Windows, Linux) | ⏳ phase 2 |
-| `apps/web` | Interface React, installable en PWA (iPhone, Android) | ⏳ phase 2 |
+| `crates/phonalys-server` | Serveur TLS 1.3 : installation, connexion 2FA, verrouillage auto, API patients | ✅ testé |
+| `web` | Interface React + TypeScript servie par le serveur, installable en PWA (iPhone, Android) | ✅ testé |
+| `apps/desktop` | Application Tauri (Windows, Linux) | ⏳ phase 3 |
 
 ## Développement
 
-Prérequis : [Rust stable](https://rustup.rs). Sous Windows, il faut aussi les Build Tools MSVC.
+Prérequis : [Rust stable](https://rustup.rs) et Node.js 24. Sous Windows, il faut aussi les Build Tools MSVC.
 
 ```sh
 cargo test --workspace          # tous les tests
 cargo clippy --workspace --all-targets -- -D warnings
+cd web && npm ci && npm test && npm run build && cd ..   # interface (web/dist)
 cargo run -p phonalys-server    # écoute sur https://127.0.0.1:8443 (TLS 1.3)
 ```
 
@@ -47,6 +48,7 @@ Au premier démarrage, la console affiche un **jeton d'installation à usage uni
 | `PHONALYS_BIND` | `127.0.0.1:8443` | Adresse d'écoute (`0.0.0.0:8443` pour le réseau local) |
 | `PHONALYS_PUBLIC_ORIGIN` | `https://localhost:8443` | Adresse exacte utilisée par les appareils, qui sert d'identité WebAuthn (nom de domaine obligatoire) |
 | `PHONALYS_TLS_NAMES` | — | Noms et adresses IP supplémentaires du certificat, par exemple `phonalys.lan,192.168.1.20` |
+| `PHONALYS_WEB_DIR` | `web` à côté de l'exécutable, sinon `web/dist` | Dossier de l'interface compilée |
 | `PHONALYS_INSECURE_HTTP` | — | `1` = HTTP en clair, **refusé hors de 127.0.0.1** (développement) |
 
 ## Documentation

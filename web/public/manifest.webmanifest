@@ -1,0 +1,14 @@
+{
+  "name": "Phonalys",
+  "short_name": "Phonalys",
+  "description": "Bilans logopédiques, auto-hébergés et chiffrés.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f8f9",
+  "theme_color": "#1f4e5f",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

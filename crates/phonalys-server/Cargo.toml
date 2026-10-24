@@ -1,6 +1,6 @@
 [package]
 name = "phonalys-server"
-description = "Serveur auto-hébergé de Phonalys : API, application web et synchronisation."
+description = "Serveur auto-hÃ©bergÃ© de Phonalys : API, application web et synchronisation."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -30,6 +30,7 @@ uuid.workspace = true
 zeroize.workspace = true
 rand_core.workspace = true
 data-encoding.workspace = true
+qrcode.workspace = true
 
 [dev-dependencies]
 phonalys-webauthn = { workspace = true, features = ["test-authenticator"] }

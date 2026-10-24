@@ -21,6 +21,8 @@ pub struct Config {
     pub sessions: SessionConfig,
     /// Identité WebAuthn du serveur (domaine et origines autorisées).
     pub relying_party: RelyingParty,
+    /// Dossier de l'application web compilée (`web/dist`). Absent : API seule.
+    pub web_dir: Option<PathBuf>,
 }
 
 /// Durée de validité d'un défi WebAuthn, en secondes.
