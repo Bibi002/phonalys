@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # Les actions sont épinglées sur un commit : Dependabot met à jour le SHA et le commentaire.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: cargo
+    directory: /apps/desktop
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # glib 0.18 est imposée par la pile GTK de Tauri sous Linux : aucune version
+      # corrigée n'est compatible pour l'instant. Phonalys n'utilise pas la fonction
+      # concernée (VariantStrIter). À réexaminer à chaque mise à jour de Tauri.
+      - dependency-name: glib
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev:
+        dependency-type: development

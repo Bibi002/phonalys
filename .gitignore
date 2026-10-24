@@ -13,6 +13,7 @@ dist/
 *.pem
 *.key
 *.p12
+*.pfx
 .env
 .env.*
 /data/
