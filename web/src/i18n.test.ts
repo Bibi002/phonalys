@@ -46,7 +46,7 @@ describe("traductions", () => {
     // Clés passées par variable (menus, constantes).
     const indirect = [
       "Accueil", "Patients", "Agenda", "Bilans", "Exercices", "Documents", "Réglages", "Sauvegardes", "Sécurité",
-      "Journal", "Clé biométrique", "Code à 6 chiffres", "{n} minutes", "15 minutes (recommandé)", "1 heure",
+      "Journal", "Conformité", "Clé biométrique", "Code à 6 chiffres", "{n} minutes", "15 minutes (recommandé)", "1 heure",
       "après 1 minute", "après 5 minutes (recommandé)", "après 15 minutes",
       "jamais (seul le délai d'inactivité s'applique)", "Nom du praticien ou du cabinet", "Titre", "Ex. Logopède",
       "Numéro INAMI", "Adresse", "Téléphone", "E-mail",

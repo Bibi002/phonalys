@@ -2014,6 +2014,121 @@ async fn documents_are_encrypted_typed_and_need_a_fresh_reauthentication() {
 }
 
 #[tokio::test]
+async fn patient_export_contains_the_whole_file_and_needs_a_reauthentication() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let now = state::now() - 30;
+    let cookie = h.login_at(&totp, now).await;
+    let c = Some(cookie.as_str());
+    let (_, _, p) = h
+        .call(
+            "POST",
+            "/api/patients",
+            Some(json!({ "nom": "Export", "prenom": "Léa" })),
+            c,
+        )
+        .await;
+    let pid = p["id"].as_str().unwrap().to_owned();
+    let (_, _, other) = h
+        .call("POST", "/api/patients", Some(json!({ "nom": "Autre" })), c)
+        .await;
+    for (kind, pid) in [
+        ("seance", &pid),
+        ("bilan", &pid),
+        ("seance", &other["id"].as_str().unwrap().to_owned()),
+    ] {
+        let (s, _, _) = h
+            .call(
+                "POST",
+                &format!("/api/records/{kind}"),
+                Some(json!({ "patient_id": pid, "notes": "texte" })),
+                c,
+            )
+            .await;
+        assert_eq!(s, StatusCode::CREATED);
+    }
+    let pdf = b"%PDF-1.7\nCourrier".to_vec();
+    let (s, _) = raw(
+        &h,
+        "POST",
+        &format!("/api/documents?name=Courrier.pdf&patient_id={pid}"),
+        &[],
+        pdf.clone(),
+        c,
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+
+    // Le registre des violations est propre au cabinet et n'entre pas dans l'export.
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/records/violation",
+            Some(json!({ "date_constat": "2026-10-20T10:00", "description": "perte" })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED);
+
+    let url = format!("/api/patients/{pid}/export");
+    let (s, _, _) = get_full(&h, &url, &cookie).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/reauth",
+            Some(json!({ "passphrase": PASSPHRASE, "code": totp.code_at(now + 30) })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, headers, body) = get_full(&h, &url, &cookie).await;
+    assert_eq!(s, StatusCode::OK);
+    let disposition = headers["content-disposition"].to_str().unwrap();
+    assert!(
+        disposition.starts_with("attachment; filename=\"dossier-patient-"),
+        "{disposition}"
+    );
+    assert!(
+        !disposition.contains("Export"),
+        "aucune identité dans le nom du fichier"
+    );
+    assert_eq!(headers["cache-control"], "no-store");
+
+    let doc: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(doc["format"], "phonalys-dossier-patient");
+    assert_eq!(doc["patient"]["prenom"], "Léa");
+    assert_eq!(doc["records"]["seance"].as_array().unwrap().len(), 1);
+    assert_eq!(doc["records"]["bilan"].as_array().unwrap().len(), 1);
+    assert_eq!(doc["records"]["objectif"], json!([]));
+    assert!(doc["records"].get("violation").is_none());
+    let docs = doc["documents"].as_array().unwrap();
+    assert_eq!(docs.len(), 1);
+    assert_eq!(
+        data_encoding::BASE64
+            .decode(docs[0]["content_base64"].as_str().unwrap().as_bytes())
+            .unwrap(),
+        pdf
+    );
+
+    let (s, _, _) = get_full(
+        &h,
+        "/api/patients/00000000-0000-4000-8000-000000000000/export",
+        &cookie,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (_, _, audit) = h.call("GET", "/api/audit", None, c).await;
+    assert!(audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["action"] == "export" && e["target"] == format!("patient/{pid}")));
+}
+
+#[tokio::test]
 async fn reauthentication_with_a_biometric_key() {
     let h = Harness::new();
     let (totp, _) = h.setup().await;

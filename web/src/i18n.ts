@@ -88,6 +88,7 @@ const NL: Dict = {
   Sauvegardes: "Back-ups",
   "Sécurité": "Beveiliging",
   Journal: "Logboek",
+  "Conformité": "Privacy",
   "Connexion au serveur…": "Verbinding met de server…",
   "Serveur injoignable": "Server onbereikbaar",
   "Vérifiez que le serveur Phonalys du cabinet est démarré et que cet appareil est sur le même réseau.":
@@ -261,6 +262,7 @@ const DE: Dict = {
   Sauvegardes: "Sicherungen",
   "Sécurité": "Sicherheit",
   Journal: "Protokoll",
+  "Conformité": "Datenschutz",
   "Connexion au serveur…": "Verbindung zum Server…",
   "Serveur injoignable": "Server nicht erreichbar",
   "Vérifiez que le serveur Phonalys du cabinet est démarré et que cet appareil est sur le même réseau.":

@@ -64,5 +64,8 @@
 
 ## Phase 6 — Mise sur le marché
 - [ ] Audit de sécurité externe et test d'intrusion
-- [ ] Validation juridique (CLUF, AIPD type), dépôt de la marque
+- [x] Écran « Conformité » : registre des traitements, notice patients, trame d'AIPD, procédure et registre des violations (72 h)
+- [x] Copie complète du dossier patient (RGPD art. 15 et 20, droits du patient art. 9), après réauthentification
+- [ ] Alerte à l'échéance de conservation (30 ans après le dernier contact)
+- [ ] Validation juridique (CLUF, registre, notice, AIPD), dépôt de la marque
 - [ ] Builds reproductibles, signature des installateurs, mises à jour signées

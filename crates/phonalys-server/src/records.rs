@@ -19,6 +19,8 @@ use serde_json::{Map, Value};
 
 /// Types d'enregistrements cliniques acceptés.
 pub const CLINICAL_KINDS: &[&str] = &["seance", "bilan", "objectif", "exercice"];
+/// Registres propres au cabinet, sans patient : violations de données (RGPD art. 33.5).
+pub const CABINET_KINDS: &[&str] = &["violation"];
 /// Taille maximale d'un enregistrement sérialisé.
 const MAX_RECORD_BYTES: usize = 2 * 1024 * 1024;
 const SETTINGS: &str = "settings";
@@ -32,6 +34,7 @@ const DEFAULT_HIDDEN_MINUTES: u64 = 5;
 fn kind(k: &str) -> Result<&'static str, ApiError> {
     CLINICAL_KINDS
         .iter()
+        .chain(CABINET_KINDS)
         .find(|known| **known == k)
         .copied()
         .ok_or(ApiError::NotFound)

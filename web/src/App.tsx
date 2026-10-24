@@ -5,6 +5,7 @@ import { Agenda } from "./screens/Agenda";
 import { Audit } from "./screens/Audit";
 import { Backups } from "./screens/Backups";
 import { Bilans } from "./screens/Bilans";
+import { Conformite } from "./screens/Conformite";
 import { Documents } from "./screens/Documents";
 import { Exercises } from "./screens/Exercises";
 import { Home } from "./screens/Home";
@@ -18,7 +19,7 @@ import { t, useLang } from "./i18n";
 import { webauthnAvailable } from "./webauthn";
 
 type Phase = "loading" | "setup" | "login" | "open" | "offline";
-export type Page = "home" | "patients" | "agenda" | "bilans" | "exercices" | "documents" | "settings" | "backups" | "security" | "audit";
+export type Page = "home" | "patients" | "agenda" | "bilans" | "exercices" | "documents" | "settings" | "backups" | "security" | "audit" | "conformite";
 export type Navigate = (page: Page, patientId?: string) => void;
 
 const PAGES: readonly (readonly [Page, string])[] = [
@@ -32,6 +33,7 @@ const PAGES: readonly (readonly [Page, string])[] = [
   ["backups", "Sauvegardes"],
   ["security", "Sécurité"],
   ["audit", "Journal"],
+  ["conformite", "Conformité"],
 ];
 
 /** Le compte à rebours n'apparaît que dans les dernières minutes avant le verrouillage. */
@@ -185,6 +187,7 @@ export function App() {
         {page === "backups" && <Backups />}
         {page === "security" && <Security />}
         {page === "audit" && <Audit />}
+        {page === "conformite" && <Conformite />}
       </main>
     </div>
   );

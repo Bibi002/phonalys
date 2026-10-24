@@ -132,7 +132,7 @@ fn target(id: &str) -> String {
 }
 
 /// La session de la requête a-t-elle été réauthentifiée récemment ?
-fn require_elevation(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
+pub(crate) fn require_elevation(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
     let elevated =
         session_token(headers).is_some_and(|t| state.lock_inner().sessions.is_elevated(&t, now()));
     if elevated {
@@ -359,6 +359,30 @@ pub async fn delete(
         erase(vault, &id)?;
         Ok(StatusCode::NO_CONTENT)
     })
+}
+
+/// Document déchiffré, pour l'export du dossier.
+pub(crate) struct FullDocument {
+    pub id: String,
+    pub meta: DocumentMeta,
+    pub bytes: Zeroizing<Vec<u8>>,
+}
+
+/// Documents d'un patient avec leur contenu déchiffré (export du dossier).
+pub(crate) fn patient_documents(
+    vault: &UnlockedVault,
+    patient_id: &str,
+) -> Result<Vec<FullDocument>, ApiError> {
+    let mut out = Vec::new();
+    for id in vault.list(META)? {
+        let meta: DocumentMeta = vault.get_json(META, &id)?;
+        if meta.patient_id.as_deref() == Some(patient_id) {
+            let bytes = vault.get(BLOB, &id)?;
+            out.push(FullDocument { id, meta, bytes });
+        }
+    }
+    out.sort_by_key(|d| d.meta.created_at);
+    Ok(out)
 }
 
 /// Efface les documents d'un patient, avec son dossier.

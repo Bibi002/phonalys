@@ -91,7 +91,7 @@ function useElevation() {
 }
 
 /** Confirmation d'identité : clé biométrique, ou phrase de passe et code à 6 chiffres. */
-export function Reauth(props: { onDone: (secs: number) => void; onCancel: () => void }) {
+export function Reauth(props: { onDone: (secs: number) => void; onCancel: () => void; reason?: string }) {
   const security = useLoad(() => api<SecurityStatus>("GET", "/api/security"));
   const [passphrase, setPassphrase] = useState("");
   const [code, setCode] = useState("");
@@ -121,8 +121,8 @@ export function Reauth(props: { onDone: (secs: number) => void; onCancel: () => 
     <section className="card reauth" aria-labelledby="reauth-title">
       <h2 id="reauth-title">Confirmez votre identité</h2>
       <p className="muted">
-        Les documents sont protégés par une vérification supplémentaire, valable 5 minutes sur cet appareil. Une session
-        restée ouverte ne suffit pas à les consulter.
+        {props.reason ??
+          "Les documents sont protégés par une vérification supplémentaire, valable 5 minutes sur cet appareil. Une session restée ouverte ne suffit pas à les consulter."}
       </p>
       <ErrorBox error={error ?? security.error} />
       {canKey && (

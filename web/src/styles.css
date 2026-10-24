@@ -337,3 +337,10 @@ a.button {
   text-decoration: none;
 }
 .restore { border-top: 1px solid var(--border); margin-top: 1rem; padding-top: 1rem; }
+/* Documents de conformité */
+.legal h3 { margin-top: 1.2rem; }
+.facts { display: grid; grid-template-columns: minmax(9rem, 14rem) 1fr; gap: 0.4rem 1rem; margin: 0.5rem 0; }
+.facts dt { font-weight: 600; }
+.facts dd { margin: 0; }
+@media (max-width: 640px) { .facts { grid-template-columns: 1fr; } .facts dd { margin-bottom: 0.4rem; } }
+.breach { border-top: 1px solid var(--border); padding-top: 0.75rem; margin-bottom: 1rem; }

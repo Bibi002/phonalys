@@ -5,6 +5,7 @@ mod api;
 mod backup;
 mod documents;
 mod error;
+mod export;
 mod pairing;
 mod passkey;
 mod records;
@@ -157,6 +158,7 @@ pub fn app(state: AppState) -> Router {
                 .put(api::update_patient)
                 .delete(api::delete_patient),
         )
+        .route("/api/patients/{id}/export", get(export::patient))
         .route("/api/passkeys", get(passkey::list))
         .route(
             "/api/passkeys/register/start",

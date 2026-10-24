@@ -4,6 +4,7 @@ import type { Navigate } from "../App";
 import { ConfirmButton, Empty, ErrorBox, Field, Select, Tabs, TextArea, useAction } from "../components";
 import { exerciseTitle } from "../exercises";
 import { DocumentsPanel } from "./Documents";
+import { ExportPatient } from "./Export";
 import { Progression } from "./Progression";
 import { usePatients, useRecords } from "../hooks";
 import {
@@ -188,6 +189,7 @@ function PatientFile(props: {
       {(tab === "identite" || tab === "anamnese" || tab === "pec") && (
         <PatientForm key={patient.id + tab} patient={patient} tab={tab} onSaved={props.onChanged} onErased={props.onErased} />
       )}
+      {tab === "identite" && <ExportPatient patientId={patient.id} />}
       {tab === "seances" && <PatientSeances patient={patient} />}
       {tab === "bilans" && <PatientBilans patient={patient} />}
       {tab === "objectifs" && <PatientObjectifs patient={patient} />}

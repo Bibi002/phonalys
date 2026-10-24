@@ -1,8 +1,6 @@
 # Conformité légale
 
 > ⚠️ Ce document est un **guide de travail**, pas un avis juridique. Avant la commercialisation, il doit être validé par un avocat spécialisé en droit de la santé et des données, ainsi que par un consultant réglementaire pour les dispositifs médicaux. À relire au moins une fois par an (dernière révision : octobre 2026).
->
-> Phonalys en intègre une version à jour pour que l'IA locale en tienne compte lors de la rédaction.
 
 ## 1. Protection des données (RGPD et droit belge)
 
@@ -14,18 +12,19 @@
 | Minimisation | Art. 5.1.c | Les champs obligatoires sont réduits au strict nécessaire, et les identifiants sont pseudonymisés pour l'IA. |
 | Sécurité du traitement | Art. 32 | Chiffrement, 2FA, audit (voir [SECURITE.md](SECURITE.md)). |
 | Protection dès la conception et par défaut | Art. 25 | Fonctionnement local par défaut, aucune télémétrie, IA locale uniquement. |
-| Registre des activités | Art. 30 | Un modèle de registre est généré par l'application. |
-| AIPD | Art. 35 | Un modèle d'analyse d'impact est fourni (données de santé de mineurs et IA : une AIPD est recommandée). |
-| Violation de données | Art. 33–34 | Une procédure guidée aide à notifier l'APD **sous 72 h**. |
-| Droits des personnes | Art. 15–21 | Export complet (accès, portabilité), rectification, effacement dans la limite des obligations de conservation. |
+| Registre des activités | Art. 30 | Écran « Conformité » : registre prérempli avec les coordonnées du cabinet, imprimable. |
+| Information des personnes | Art. 13 | Écran « Conformité » : notice pour les patients et leurs parents, préremplie, à remettre au premier rendez-vous. |
+| AIPD | Art. 35 | Écran « Conformité » : trame d'analyse d'impact avec les risques et les mesures de Phonalys ; le cabinet évalue le risque résiduel (données de santé de mineurs : une AIPD est recommandée). |
+| Violation de données | Art. 33–34 | Écran « Conformité » : procédure pas à pas, registre des violations chiffré dans le coffre (art. 33.5) et décompte du délai de **72 h**. La notification elle-même se fait sur le site de l'APD. |
+| Droits des personnes | Art. 15–21 | Fiche patient › « Copie du dossier » : export complet en JSON (identité, dossier clinique, documents), après réauthentification et inscrit au journal ; rectification ; effacement complet du dossier, à n'utiliser que dans la limite des obligations de conservation. |
 | Sous-traitance | Art. 28 | L'éditeur n'est pas sous-traitant, puisqu'il n'accède à aucune donnée. À formaliser dans le CLUF. |
 
 **Mineurs :** les droits s'exercent par les parents ou représentants légaux. Il faut tenir compte de la capacité de discernement de l'enfant (loi droits du patient, art. 12).
 
 ## 2. Droit belge de la santé
 
-- **Loi du 22 août 2002 relative aux droits du patient** (modifiée, notamment, par la loi du 6 février 2024) : droit à un dossier soigneusement tenu, droit de le consulter et d'en obtenir une copie, et droit à l'information. Phonalys permet l'export lisible du dossier et en garde l'historique.
-- **Loi du 22 avril 2019 relative à la qualité de la pratique des soins de santé** : tenue du dossier patient, dont le contenu minimal est défini, et conservation **au moins 30 ans et au plus 50 ans** après le dernier contact. Phonalys applique ces durées par défaut et alerte à l'échéance.
+- **Loi du 22 août 2002 relative aux droits du patient** (modifiée, notamment, par la loi du 6 février 2024) : droit à un dossier soigneusement tenu, droit de le consulter et d'en obtenir une copie, et droit à l'information. Phonalys exporte le dossier complet (« Copie du dossier ») et imprime chaque bilan ; le journal d'audit garde la trace des consultations et modifications.
+- **Loi du 22 avril 2019 relative à la qualité de la pratique des soins de santé** : tenue du dossier patient, dont le contenu minimal est défini, et conservation **au moins 30 ans et au plus 50 ans** après le dernier contact (art. 35). Phonalys n'efface jamais un dossier de lui-même ; la durée figure dans le registre et la notice. Une alerte à l'échéance reste à développer.
 - **Profession de logopède** (profession paramédicale) : agrément et visa délivrés par le SPF Santé publique. Le numéro INAMI et le visa figurent sur les documents.
 - **Assurance soins de santé (INAMI)** : nomenclature des prestations de logopédie (art. 36) et conditions des bilans pour l'accord du médecin-conseil. Les modèles de bilan Phonalys suivent la structure attendue. **Les seuils et critères restent paramétrables**, parce qu'ils évoluent.
 - **Secret professionnel** (Code pénal, art. 458).
@@ -53,7 +52,7 @@ Un logiciel destiné à fournir des informations utilisées pour prendre des dé
 ## 5. Propriété intellectuelle
 
 - Phonalys **ne reproduit aucun contenu** de batteries existantes (items, images, consignes, normes). Les idées, les domaines évalués et les principes psychométriques ne sont pas protégés ; leur expression l'est.
-- Le praticien qui encode une épreuve sous licence doit respecter le contrat de l'éditeur de cette épreuve. Phonalys lui rappelle cette obligation à l'import.
+- Le praticien qui encode une épreuve sous licence doit respecter le contrat de l'éditeur de cette épreuve. Phonalys le lui rappelle sur l'écran de saisie des bilans.
 - Nom et logo « Phonalys » : vérifier l'antériorité puis déposer la marque (BOIP pour le Benelux, EUIPO pour l'UE).
 
 ## 6. Accessibilité et consommation

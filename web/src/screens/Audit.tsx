@@ -29,11 +29,28 @@ const LABELS: Record<string, string> = {
   audit_viewed: "Journal consulté",
   document_imported: "Document importé",
   document_opened: "Document ouvert",
-  reauthenticated: "Identité confirmée (documents)",
+  reauthenticated: "Identité confirmée (opération sensible)",
+  ai_request: "Demande à l'assistant de rédaction",
+  assessment_scored: "Épreuve cotée",
+  report_generated: "Compte rendu produit",
   export: "Sauvegarde",
 };
 
-const KINDS: Record<string, string> = { seance: "séance", bilan: "bilan", objectif: "objectif", exercice: "exercice", document: "document" };
+/** Libellé d'une entrée : un export vise soit une sauvegarde, soit le dossier d'un patient. */
+export function actionLabel(action: string, target: string | null): string {
+  if (action === "export" && target?.startsWith("patient/")) return "Copie du dossier exportée";
+  return LABELS[action] ?? action;
+}
+
+const KINDS: Record<string, string> = {
+  seance: "séance",
+  bilan: "bilan",
+  objectif: "objectif",
+  exercice: "exercice",
+  document: "document",
+  patient: "dossier",
+  violation: "registre des violations",
+};
 
 function describeTarget(t: string | null): string {
   if (!t) return "";
@@ -71,7 +88,7 @@ export function Audit() {
                 {p.entries.map((e) => (
                   <tr key={e.seq}>
                     <td className="small">{new Date(e.at).toLocaleString("fr-BE")}</td>
-                    <td>{LABELS[e.action] ?? e.action}</td>
+                    <td>{actionLabel(e.action, e.target)}</td>
                     <td className="muted small">{describeTarget(e.target)}</td>
                   </tr>
                 ))}
