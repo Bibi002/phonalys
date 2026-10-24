@@ -45,7 +45,7 @@ rcgen = "0.13"
 tokio-rustls = { version = "0.26", default-features = false }
 
 argon2 = { version = "0.5", features = ["std"] }
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 rand_core = { version = "0.6", features = ["getrandom"] }
 zeroize = { version = "1.8", features = ["derive", "serde"] }
 subtle = "2.6"
