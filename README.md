@@ -72,6 +72,7 @@ L'autorité du cabinet est limitée par une contrainte de noms aux adresses du r
 
 ## Documentation
 
+- [Installer Phonalys (guide du praticien)](docs/INSTALLATION.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Sécurité et modèle de menace](docs/SECURITE.md)
 - [Conformité légale (RGPD, droit belge, MDR, AI Act)](docs/CONFORMITE.md)
