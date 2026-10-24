@@ -75,6 +75,8 @@ export interface SessionInfo {
   /** Identité confirmée récemment : les documents du coffre sont consultables. */
   elevated?: boolean;
   elevated_secs?: number;
+  /** Au-delà de cette durée en arrière-plan, l'appareil ferme sa session (0 : jamais). */
+  hidden_lock_secs?: number;
 }
 
 export type { Patient } from "./model";
@@ -107,6 +109,7 @@ export interface Settings {
   practitioner: Record<string, string>;
   auto_backup: boolean;
   backup_extra_dir?: string | null;
+  hidden_lock_minutes?: number;
 }
 
 export interface AuditEntry {

@@ -206,6 +206,21 @@ impl AppState {
         }
     }
 
+    /// Verrouille immédiatement : toutes les sessions sont fermées, sur tous les
+    /// appareils, et les clés quittent la mémoire.
+    pub fn lock_all(&self, reason: AuditAction) {
+        let mut inner = self.lock_inner();
+        inner.sessions.revoke_all();
+        inner.pending_login = None;
+        inner.pending_reauth = None;
+        if let Phase::Unlocked(mut vault) = std::mem::replace(&mut inner.phase, Phase::Locked) {
+            if let Err(e) = vault.audit(ACTOR, reason, None) {
+                tracing::error!(error = %e, "audit du verrouillage");
+            }
+            tracing::info!(?reason, "coffre verrouillé");
+        }
+    }
+
     /// Le coffre est-il actuellement déverrouillé ?
     pub fn is_unlocked(&self) -> bool {
         matches!(self.lock_inner().phase, Phase::Unlocked(_))

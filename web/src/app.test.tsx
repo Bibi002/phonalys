@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App } from "./App";
 
 afterEach(() => {
@@ -15,7 +15,7 @@ function fakeServer() {
     "fetch",
     vi.fn(async (url: string) => {
       if (url === "/api/status") return json({ initialized: true });
-      if (url === "/api/session") return json({ idle_timeout_secs: 900 });
+      if (url === "/api/session") return json({ idle_timeout_secs: 900, hidden_lock_secs: 60 });
       if (url === "/api/patients") return json([PATIENT]);
       if (url.startsWith("/api/records/bilan"))
         return json([{ id: "b1", patient_id: PATIENT.id, date: "2026-10-01", type: "initial", resultats: [{ epreuve: "Répétition", mesure: "z", valeur: "-1" }] }]);
@@ -79,6 +79,36 @@ describe("application", () => {
     screen.getByRole("button", { name: "Ça rime" });
   });
 });
+describe("arrière-plan", () => {
+  function setVisibility(state: "hidden" | "visible") {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }
+
+  it("un bref passage en arrière-plan garde la session, un long la ferme", async () => {
+    fakeServer();
+    render(<App />);
+    await screen.findByRole("navigation");
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now");
+    const logouts = () =>
+      (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls.filter(([u]) => u === "/api/logout").length;
+
+    clock.mockReturnValue(start);
+    setVisibility("hidden");
+    clock.mockReturnValue(start + 30_000);
+    setVisibility("visible");
+    expect(logouts()).toBe(0);
+
+    setVisibility("hidden");
+    clock.mockReturnValue(start + 200_000);
+    setVisibility("visible");
+    expect(logouts()).toBe(1);
+    clock.mockRestore();
+    await waitFor(() => expect(screen.queryByRole("navigation")).toBeNull());
+  });
+});
+
 describe("coffre documentaire", () => {
   it("demande de confirmer son identité avant d'afficher un document", async () => {
     fakeServer();

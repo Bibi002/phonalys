@@ -35,7 +35,8 @@
 - [x] Icônes PNG pour iOS (apple-touch-icon)
 - [x] Application de bureau Tauri 2 : serveur embarqué sur la boucle locale (port aléatoire), navigation verrouillée, aucune commande native exposée, jeton d'installation transmis hors réseau
 - [ ] Installateurs **signés** : MSI (Windows), .deb, .rpm et AppImage (Linux) ; mises à jour signées
-- [ ] Bureau : verrouillage à la mise en veille et au verrouillage de session du système
+- [x] Verrouillage à la sortie de veille, déconnexion après un passage en arrière-plan (réglable)
+- [ ] Bureau : détection du verrouillage de session du système (Win+L) sans mise en veille
 - [ ] Bureau sous Linux : WebKitGTK ne gère pas encore WebAuthn (connexion par code TOTP en attendant)
 - [ ] Synchronisation en temps réel (WebSocket), fonctionnement hors ligne
 

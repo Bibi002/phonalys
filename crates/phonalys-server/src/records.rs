@@ -25,6 +25,9 @@ const SETTINGS: &str = "settings";
 /// Délais de verrouillage automatique proposés, en minutes.
 pub const IDLE_CHOICES_MINUTES: &[u64] = &[5, 10, 15, 30, 60];
 const DEFAULT_IDLE_MINUTES: u64 = 15;
+/// Verrouillage quand l'application passe en arrière-plan (0 : jamais), en minutes.
+pub const HIDDEN_CHOICES_MINUTES: &[u64] = &[0, 1, 5, 15];
+const DEFAULT_HIDDEN_MINUTES: u64 = 5;
 
 fn kind(k: &str) -> Result<&'static str, ApiError> {
     CLINICAL_KINDS
@@ -207,6 +210,14 @@ pub struct Settings {
     /// Second dossier recevant une copie de chaque sauvegarde (clé USB, NAS).
     #[serde(default)]
     pub backup_extra_dir: Option<String>,
+    /// Fenêtre réduite, onglet masqué ou téléphone en veille plus longtemps que ce
+    /// délai : la session de l'appareil est fermée à son retour.
+    #[serde(default = "default_hidden")]
+    pub hidden_lock_minutes: u64,
+}
+
+fn default_hidden() -> u64 {
+    DEFAULT_HIDDEN_MINUTES
 }
 
 fn yes() -> bool {
@@ -224,6 +235,7 @@ impl Default for Settings {
             practitioner: Map::new(),
             auto_backup: true,
             backup_extra_dir: None,
+            hidden_lock_minutes: DEFAULT_HIDDEN_MINUTES,
         }
     }
 }
@@ -246,6 +258,11 @@ pub async fn put_settings(
     if !IDLE_CHOICES_MINUTES.contains(&new.idle_timeout_minutes) {
         return Err(ApiError::BadRequest(format!(
             "délai de verrouillage non proposé : choisissez parmi {IDLE_CHOICES_MINUTES:?} minutes"
+        )));
+    }
+    if !HIDDEN_CHOICES_MINUTES.contains(&new.hidden_lock_minutes) {
+        return Err(ApiError::BadRequest(format!(
+            "délai d'arrière-plan non proposé : choisissez parmi {HIDDEN_CHOICES_MINUTES:?} minutes"
         )));
     }
     if serde_json::to_vec(&new)?.len() > 64 * 1024 {

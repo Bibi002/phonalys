@@ -42,6 +42,7 @@ export function App() {
   const [page, setPage] = useState<Page>("home");
   const [patientId, setPatientId] = useState<string>();
   const [idle, setIdle] = useState(900);
+  const [hiddenLock, setHiddenLock] = useState(300);
   const lastActivity = useRef(Date.now());
 
   const refresh = useCallback(async () => {
@@ -51,6 +52,7 @@ export function App() {
       try {
         const s = await api<SessionInfo>("GET", "/api/session");
         setIdle(s.idle_timeout_secs);
+        setHiddenLock(s.hidden_lock_secs ?? 300);
         setPhase("open");
       } catch {
         setPhase("login");
@@ -85,6 +87,35 @@ export function App() {
     events.forEach((e) => window.addEventListener(e, onInput, { passive: true }));
     return () => events.forEach((e) => window.removeEventListener(e, onInput));
   }, [phase]);
+
+  // Fenêtre réduite, onglet masqué, téléphone mis en veille : au-delà du délai réglé,
+  // la session de cet appareil est fermée (les autres appareils restent connectés).
+  useEffect(() => {
+    if (phase !== "open" || hiddenLock <= 0) return;
+    let hiddenAt: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const close = () => {
+      void api("POST", "/api/logout")
+        .catch(() => undefined)
+        .finally(() => setPhase("login"));
+    };
+    const onVisibility = () => {
+      clearTimeout(timer);
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        timer = setTimeout(close, hiddenLock * 1000);
+        return;
+      }
+      // Les minuteurs sont suspendus en arrière-plan sur mobile : contrôle au retour.
+      if (hiddenAt !== undefined && Date.now() - hiddenAt >= hiddenLock * 1000) close();
+      hiddenAt = undefined;
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [phase, hiddenLock]);
 
   const navigate: Navigate = useCallback((p, id) => {
     setPage(p);
@@ -138,7 +169,7 @@ export function App() {
         {page === "bilans" && <Bilans navigate={navigate} />}
         {page === "exercices" && <Exercises patientId={patientId} />}
         {page === "documents" && <Documents />}
-        {page === "settings" && <Settings onIdleChanged={setIdle} />}
+        {page === "settings" && <Settings onIdleChanged={setIdle} onHiddenLockChanged={setHiddenLock} />}
         {page === "backups" && <Backups />}
         {page === "security" && <Security />}
         {page === "audit" && <Audit />}

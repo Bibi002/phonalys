@@ -277,15 +277,34 @@ pub fn app(state: AppState) -> Router {
     ))
 }
 
-/// Tâche de fond : verrouille le coffre dès qu'aucune session n'est plus active, et
-/// lance la sauvegarde quotidienne pendant l'utilisation.
+/// Écart entre deux passages de la tâche de fond (prévue toutes les 15 s) au-delà
+/// duquel l'ordinateur est considéré comme sorti de veille.
+pub const SUSPEND_GAP_SECS: u64 = 90;
+
+/// Un écart anormal entre deux passages signale une mise en veille ou une hibernation
+/// (le minuteur est suspendu, l'horloge murale non) : au réveil, tout est verrouillé,
+/// quel que soit le délai d'inactivité.
+pub fn resumed_from_sleep(previous: u64, now: u64) -> bool {
+    now.saturating_sub(previous) > SUSPEND_GAP_SECS
+}
+
+/// Tâche de fond : verrouille le coffre dès qu'aucune session n'est plus active ou
+/// au sortir de veille, et lance la sauvegarde quotidienne pendant l'utilisation.
 pub fn spawn_auto_lock(state: AppState) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(15));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut n: u64 = 0;
+        let mut previous = state::now();
         loop {
             tick.tick().await;
-            state.auto_lock(state::now());
+            let now = state::now();
+            if resumed_from_sleep(previous, now) {
+                tracing::info!("sortie de veille détectée");
+                state.lock_all(phonalys_core::audit::AuditAction::AutoLock);
+            }
+            previous = now;
+            state.auto_lock(now);
             n += 1;
             if n % 20 == 1 {
                 let s = state.clone();

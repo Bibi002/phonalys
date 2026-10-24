@@ -2071,3 +2071,37 @@ async fn reauthentication_with_a_biometric_key() {
         .await;
     assert_eq!(info["elevated"], false);
 }
+
+#[tokio::test]
+async fn background_lock_setting_and_wake_from_sleep() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let c = Some(cookie.as_str());
+    let (_, _, info) = h.call("GET", "/api/session", None, c).await;
+    assert_eq!(info["hidden_lock_secs"], 300);
+    let (_, _, mut s) = h.call("GET", "/api/settings", None, c).await;
+    s["hidden_lock_minutes"] = json!(7);
+    let (status, _, _) = h.call("PUT", "/api/settings", Some(s.clone()), c).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    s["hidden_lock_minutes"] = json!(1);
+    let (status, _, _) = h.call("PUT", "/api/settings", Some(s), c).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, _, info) = h.call("GET", "/api/session", None, c).await;
+    assert_eq!(info["hidden_lock_secs"], 60);
+
+    // Un tic de 15 s est normal ; deux minutes sans tic signalent une veille.
+    assert!(!resumed_from_sleep(1000, 1015));
+    assert!(!resumed_from_sleep(1000, 1060));
+    assert!(resumed_from_sleep(1000, 1000 + SUSPEND_GAP_SECS + 1));
+    assert!(
+        !resumed_from_sleep(1000, 900),
+        "horloge reculée : pas de faux réveil"
+    );
+
+    h.state
+        .lock_all(phonalys_core::audit::AuditAction::AutoLock);
+    assert!(!h.state.is_unlocked());
+    let (status, _, _) = h.call("GET", "/api/session", None, c).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}

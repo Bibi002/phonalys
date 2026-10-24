@@ -360,16 +360,25 @@ pub struct SessionInfo {
     elevated: bool,
     /// Secondes restantes avant que les documents ne se referment.
     elevated_secs: u64,
+    /// Au-delà de cette durée en arrière-plan, l'appareil ferme sa session (0 : jamais).
+    hidden_lock_secs: u64,
 }
 
 pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<SessionInfo> {
     let inner = state.lock_inner();
     let elevated_secs =
         session_token(&headers).map_or(0, |t| inner.sessions.elevation_remaining(&t, now()));
+    let hidden_lock_secs = match &inner.phase {
+        Phase::Unlocked(vault) => crate::records::settings(vault)
+            .map(|s| s.hidden_lock_minutes * 60)
+            .unwrap_or(0),
+        Phase::Locked => 0,
+    };
     Json(SessionInfo {
         idle_timeout_secs: inner.sessions.config().idle_timeout_secs,
         elevated: elevated_secs > 0,
         elevated_secs,
+        hidden_lock_secs,
     })
 }
 
@@ -383,13 +392,9 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
 }
 
 /// Verrouillage immédiat : toutes les sessions, sur tous les appareils.
-pub async fn lock(State(state): State<AppState>) -> Result<Response, ApiError> {
-    let mut inner = state.lock_inner();
-    inner.sessions.revoke_all();
-    if let Phase::Unlocked(mut vault) = std::mem::replace(&mut inner.phase, Phase::Locked) {
-        vault.audit(ACTOR, AuditAction::Lock, None)?;
-    }
-    Ok(expire_cookie(StatusCode::NO_CONTENT.into_response()))
+pub async fn lock(State(state): State<AppState>) -> Response {
+    state.lock_all(AuditAction::Lock);
+    expire_cookie(StatusCode::NO_CONTENT.into_response())
 }
 
 pub(crate) fn parse_id(id: &str) -> Result<String, ApiError> {

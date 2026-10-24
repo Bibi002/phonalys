@@ -10,6 +10,13 @@ const IDLE = [
   ["60", "1 heure"],
 ] as const;
 
+const HIDDEN = [
+  ["1", "après 1 minute"],
+  ["5", "après 5 minutes (recommandé)"],
+  ["15", "après 15 minutes"],
+  ["0", "jamais (seul le délai d'inactivité s'applique)"],
+] as const;
+
 const FIELDS = [
   ["nom", "Nom du praticien ou du cabinet"],
   ["titre", "Titre", "Ex. Logopède"],
@@ -19,7 +26,7 @@ const FIELDS = [
   ["email", "E-mail"],
 ] as const;
 
-export function Settings({ onIdleChanged }: { onIdleChanged: (secs: number) => void }) {
+export function Settings({ onIdleChanged, onHiddenLockChanged }: { onIdleChanged: (secs: number) => void; onHiddenLockChanged?: (secs: number) => void }) {
   const loaded = useLoad(() => api<SettingsData>("GET", "/api/settings"));
   const [s, setS] = useState<SettingsData>();
   const [saved, setSaved] = useState(false);
@@ -36,6 +43,7 @@ export function Settings({ onIdleChanged }: { onIdleChanged: (secs: number) => v
       const r = await api<SettingsData>("PUT", "/api/settings", s);
       setS(r);
       onIdleChanged(r.idle_timeout_minutes * 60);
+      onHiddenLockChanged?.((r.hidden_lock_minutes ?? 5) * 60);
       setSaved(true);
     });
   }
@@ -56,6 +64,13 @@ export function Settings({ onIdleChanged }: { onIdleChanged: (secs: number) => v
           value={String(s.idle_timeout_minutes) as (typeof IDLE)[number][0]}
           onChange={(v) => { setSaved(false); setS({ ...s, idle_timeout_minutes: Number(v) }); }}
           options={IDLE}
+        />
+        <Select
+          label="Application en arrière-plan"
+          value={String(s.hidden_lock_minutes ?? 5) as (typeof HIDDEN)[number][0]}
+          onChange={(v) => { setSaved(false); setS({ ...s, hidden_lock_minutes: Number(v) }); }}
+          options={HIDDEN}
+          hint="Fenêtre réduite, autre onglet, téléphone en veille : l'appareil se déconnecte. La mise en veille de l'ordinateur verrouille toujours tout."
         />
       </section>
       <section className="card">
