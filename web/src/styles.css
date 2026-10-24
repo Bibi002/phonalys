@@ -273,3 +273,15 @@ button.letter.struck { background: var(--warn-bg); text-decoration: line-through
   .card { border: 0; padding: 0; }
   .profile .bar { fill: #444; }
 }
+a.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.restore { border-top: 1px solid var(--border); margin-top: 1rem; padding-top: 1rem; }

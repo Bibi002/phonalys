@@ -23,7 +23,8 @@ function fakeServer() {
       if (url === "/api/security")
         return json({ require_passkey: false, hardware_bound: false, passkeys: 0, bound_passkeys: 0, quick_passkeys: 0, recovery_codes_remaining: 10 });
       if (url === "/api/passkeys") return json([]);
-      if (url === "/api/settings") return json({ idle_timeout_minutes: 15, practitioner: {} });
+      if (url === "/api/settings") return json({ idle_timeout_minutes: 15, practitioner: {}, auto_backup: true });
+      if (url === "/api/backups") return json({ dir: "C:\\data", extra_dir: null, auto: true, last: null, files: [] });
       if (url === "/api/audit") return json({ verified: true, total: 1, entries: [{ seq: 0, at: "2026-10-25T10:00:00Z", action: "login", target: null }] });
       return json({ error: "introuvable" }, 404);
     }),
@@ -43,6 +44,7 @@ describe("application", () => {
       ["Réglages", /Délai d'inactivité/],
       ["Sécurité", /Clés biométriques et de sécurité/],
       ["Journal", /Intégrité du journal vérifiée/],
+      ["Sauvegardes", /Pas de copie sur un second support/],
       ["Accueil", /Aujourd'hui/],
     ];
     for (const [label, text] of expectations) {
@@ -71,5 +73,26 @@ describe("application", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Commencer" }));
     await screen.findByText("1 / 8");
     screen.getByRole("button", { name: "Ça rime" });
+  });
+});
+describe("restauration", () => {
+  it("envoie le fichier brut avec le jeton d'installation et l'en-tête anti-CSRF", async () => {
+    const f = vi.fn(async (_u: string, _i?: RequestInit) => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", f);
+    const { uploadRestore } = await import("./screens/Setup");
+    const file = new Blob([new Uint8Array([1, 2, 3])]);
+    await uploadRestore(" ABC234 ", file);
+    const [url, init] = f.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(url).toBe("/api/restore");
+    expect(headers["x-phonalys-setup-token"]).toBe("ABC234");
+    expect(headers["x-phonalys-request"]).toBe("1");
+    expect(init.body).toBe(file);
+  });
+
+  it("remonte le message d'erreur du serveur", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "ce fichier n'est pas une sauvegarde Phonalys valide" }), { status: 400 })));
+    const { uploadRestore } = await import("./screens/Setup");
+    await expect(uploadRestore("X", new Blob([]))).rejects.toThrow(/pas une sauvegarde/);
   });
 });

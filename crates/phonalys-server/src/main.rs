@@ -1,6 +1,6 @@
 use phonalys_auth::SessionConfig;
 use phonalys_crypto::KdfParams;
-use phonalys_server::{app, spawn_auto_lock, tls, AppState, Config};
+use phonalys_server::{app, restore_file, spawn_auto_lock, tls, AppState, Config};
 use phonalys_webauthn::RelyingParty;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -87,17 +87,30 @@ async fn main() -> Result<(), tls::BoxError> {
     let data_dir =
         std::env::var_os("PHONALYS_DATA_DIR").map_or_else(default_data_dir, PathBuf::from);
     create_private_dir(&data_dir)?;
+    let vault_path = data_dir.join("cabinet.phonalys-vault");
+
+    // `phonalys-server restore <fichier>` : restaure une sauvegarde puis s'arrête.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [cmd, file] = args.as_slice() {
+        if cmd == "restore" {
+            restore_file(std::path::Path::new(file), &vault_path)?;
+            eprintln!("Coffre restauré : {}", vault_path.display());
+            return Ok(());
+        }
+    }
 
     let insecure_http = std::env::var("PHONALYS_INSECURE_HTTP").as_deref() == Ok("1");
     let relying_party = relying_party(bind, insecure_http)?;
     tracing::info!(rp_id = %relying_party.id, origins = ?relying_party.origins, "identité WebAuthn");
 
     let (state, setup_token) = AppState::new(Config {
-        vault_path: data_dir.join("cabinet.phonalys-vault"),
+        vault_path,
         kdf: KdfParams::default(),
         sessions: SessionConfig::default(),
         relying_party,
         web_dir: web_dir(),
+        backup_dir: std::env::var_os("PHONALYS_BACKUP_DIR")
+            .map_or_else(|| data_dir.join("sauvegardes"), PathBuf::from),
     });
     if let Some(token) = setup_token {
         // Écrit sur la console uniquement, jamais dans les journaux persistants.

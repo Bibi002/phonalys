@@ -1,15 +1,17 @@
 //! Serveur auto-hébergé de Phonalys.
 
 mod api;
+mod backup;
 mod error;
 mod passkey;
 mod records;
 mod state;
 pub mod tls;
 
+pub use backup::restore_file;
 pub use state::{AppState, Config};
 
-use axum::extract::Request;
+use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::{header, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -183,6 +185,9 @@ pub fn app(state: AppState) -> Router {
             get(records::get_settings).put(records::put_settings),
         )
         .route("/api/audit", get(records::audit))
+        .route("/api/backups", get(backup::status).post(backup::create))
+        .route("/api/backups/{name}", get(backup::download))
+        .route("/api/backups/{name}/verify", post(backup::verify))
         .route("/api/security", get(passkey::status))
         .route(
             "/api/security/policy",
@@ -195,6 +200,7 @@ pub fn app(state: AppState) -> Router {
         ));
 
     let web_dir = state.config.web_dir.clone();
+    let restore_state = state.clone();
     let allowed = Arc::new(allowed_authorities(&state.config.relying_party.origins));
     let api = Router::new()
         .route("/api/health", get(health))
@@ -217,12 +223,19 @@ pub fn app(state: AppState) -> Router {
         None => api,
     };
 
+    // Seule la restauration accepte un gros fichier ; tout le reste est limité.
+    let restore = Router::new()
+        .route("/api/restore", post(backup::restore))
+        .layer(DefaultBodyLimit::max(backup::MAX_RESTORE_BYTES))
+        .layer(RequestBodyLimitLayer::new(backup::MAX_RESTORE_BYTES))
+        .with_state(restore_state);
     let mut router = api
+        .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
+        .merge(restore)
         .layer(middleware::from_fn(csrf_guard))
         .layer(middleware::from_fn(move |req, next| {
             host_guard(allowed.clone(), req, next)
-        }))
-        .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES));
+        }));
     for (name, value) in SECURITY_HEADERS {
         router = router.layer(SetResponseHeaderLayer::overriding(
             HeaderName::from_static(name),
@@ -235,13 +248,21 @@ pub fn app(state: AppState) -> Router {
     ))
 }
 
-/// Tâche de fond : verrouille le coffre dès qu'aucune session n'est plus active.
+/// Tâche de fond : verrouille le coffre dès qu'aucune session n'est plus active, et
+/// lance la sauvegarde quotidienne pendant l'utilisation.
 pub fn spawn_auto_lock(state: AppState) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(15));
+        let mut n: u64 = 0;
         loop {
             tick.tick().await;
             state.auto_lock(state::now());
+            n += 1;
+            if n % 20 == 1 {
+                let s = state.clone();
+                let _ = tokio::task::spawn_blocking(move || backup::auto_backup(&s, state::now()))
+                    .await;
+            }
         }
     })
 }

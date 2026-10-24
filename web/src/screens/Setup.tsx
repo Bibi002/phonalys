@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { api, type SetupResult } from "../api";
+import { api, ApiError, type SetupResult } from "../api";
 import { ErrorBox, Field, PasswordField, RecoveryCodes, useAction } from "../components";
 
 /**
@@ -11,6 +11,59 @@ export function takeSetupToken(): string {
   if (!match?.[1]) return "";
   history.replaceState(null, "", window.location.pathname + window.location.search);
   return match[1];
+}
+
+/** Envoie un fichier de sauvegarde au serveur (installation vierge uniquement). */
+export async function uploadRestore(token: string, file: Blob): Promise<void> {
+  const res = await fetch("/api/restore", {
+    method: "POST",
+    headers: { "x-phonalys-request": "1", "x-phonalys-setup-token": token.trim(), "content-type": "application/octet-stream" },
+    body: file,
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    let message = `erreur ${res.status}`;
+    try {
+      const data = (await res.json()) as { error?: unknown };
+      if (typeof data.error === "string") message = data.error;
+    } catch {
+      // réponse sans JSON
+    }
+    throw new ApiError(res.status, message);
+  }
+}
+
+function Restore({ token, onDone }: { token: string; onDone: () => void }) {
+  const [file, setFile] = useState<File>();
+  const { busy, error, run } = useAction();
+  return (
+    <div className="restore">
+      <h2>Vous avez déjà une sauvegarde ?</h2>
+      <p className="muted">
+        Sur un nouvel ordinateur, restaurez votre fichier <code>.phonalys-backup</code> au lieu de créer un coffre vide.
+        Vous vous connecterez ensuite avec la phrase de passe et le second facteur en vigueur lors de la sauvegarde.
+      </p>
+      <label className="field">
+        <span>Fichier de sauvegarde</span>
+        <input type="file" accept=".phonalys-backup" onChange={(e) => setFile(e.target.files?.[0])} />
+      </label>
+      <ErrorBox error={error} />
+      <button
+        type="button"
+        className="ghost"
+        disabled={busy || !file || !token.trim()}
+        onClick={() =>
+          void run(async () => {
+            if (file) await uploadRestore(token, file);
+            onDone();
+          })
+        }
+      >
+        {busy ? "Restauration…" : "Restaurer cette sauvegarde"}
+      </button>
+    </div>
+  );
 }
 
 export function Setup({ onDone }: { onDone: () => void }) {
@@ -109,6 +162,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
         <button type="submit" disabled={busy}>
           {busy ? "Création du coffre…" : "Créer le coffre"}
         </button>
+        <Restore token={token} onDone={onDone} />
       </form>
     </main>
   );

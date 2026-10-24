@@ -98,6 +98,8 @@ export interface BindingResult {
 export interface Settings {
   idle_timeout_minutes: number;
   practitioner: Record<string, string>;
+  auto_backup: boolean;
+  backup_extra_dir?: string | null;
 }
 
 export interface AuditEntry {

@@ -3,6 +3,7 @@ import { api, ApiError, setApiHooks, type SecurityStatus, type SessionInfo, type
 import { ErrorBox } from "./components";
 import { Agenda } from "./screens/Agenda";
 import { Audit } from "./screens/Audit";
+import { Backups } from "./screens/Backups";
 import { Bilans } from "./screens/Bilans";
 import { Exercises } from "./screens/Exercises";
 import { Home } from "./screens/Home";
@@ -14,7 +15,7 @@ import { Setup } from "./screens/Setup";
 import { webauthnAvailable } from "./webauthn";
 
 type Phase = "loading" | "setup" | "login" | "open" | "offline";
-export type Page = "home" | "patients" | "agenda" | "bilans" | "exercices" | "settings" | "security" | "audit";
+export type Page = "home" | "patients" | "agenda" | "bilans" | "exercices" | "settings" | "backups" | "security" | "audit";
 export type Navigate = (page: Page, patientId?: string) => void;
 
 const PAGES: readonly (readonly [Page, string])[] = [
@@ -24,6 +25,7 @@ const PAGES: readonly (readonly [Page, string])[] = [
   ["bilans", "Bilans"],
   ["exercices", "Exercices"],
   ["settings", "Réglages"],
+  ["backups", "Sauvegardes"],
   ["security", "Sécurité"],
   ["audit", "Journal"],
 ];
@@ -134,6 +136,7 @@ export function App() {
         {page === "bilans" && <Bilans navigate={navigate} />}
         {page === "exercices" && <Exercises patientId={patientId} />}
         {page === "settings" && <Settings onIdleChanged={setIdle} />}
+        {page === "backups" && <Backups />}
         {page === "security" && <Security />}
         {page === "audit" && <Audit />}
       </main>

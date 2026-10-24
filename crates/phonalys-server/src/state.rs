@@ -23,6 +23,8 @@ pub struct Config {
     pub relying_party: RelyingParty,
     /// Dossier de l'application web compilée (`web/dist`). Absent : API seule.
     pub web_dir: Option<PathBuf>,
+    /// Dossier des sauvegardes chiffrées.
+    pub backup_dir: PathBuf,
 }
 
 /// Durée de validité d'un défi WebAuthn, en secondes.

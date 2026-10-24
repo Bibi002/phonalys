@@ -201,6 +201,16 @@ pub struct Settings {
     /// Coordonnées du cabinet, reprises sur les bilans imprimés.
     #[serde(default)]
     pub practitioner: Map<String, Value>,
+    /// Sauvegarde automatique quotidienne (activée par défaut).
+    #[serde(default = "yes")]
+    pub auto_backup: bool,
+    /// Second dossier recevant une copie de chaque sauvegarde (clé USB, NAS).
+    #[serde(default)]
+    pub backup_extra_dir: Option<String>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn default_idle() -> u64 {
@@ -212,6 +222,8 @@ impl Default for Settings {
         Self {
             idle_timeout_minutes: DEFAULT_IDLE_MINUTES,
             practitioner: Map::new(),
+            auto_backup: true,
+            backup_extra_dir: None,
         }
     }
 }
@@ -238,6 +250,21 @@ pub async fn put_settings(
     }
     if serde_json::to_vec(&new)?.len() > 64 * 1024 {
         return Err(ApiError::BadRequest("réglages trop volumineux".into()));
+    }
+    let mut new = new;
+    new.backup_extra_dir = new
+        .backup_extra_dir
+        .map(|d| d.trim().to_owned())
+        .filter(|d| !d.is_empty());
+    if let Some(dir) = &new.backup_extra_dir {
+        let path = std::path::Path::new(dir);
+        if !path.is_absolute() || !path.is_dir() {
+            return Err(ApiError::BadRequest(
+                "dossier de sauvegarde supplémentaire introuvable : indiquez le chemin complet \
+                 d'un dossier existant (par exemple E:\\Sauvegardes)"
+                    .into(),
+            ));
+        }
     }
     let mut inner = state.lock_inner();
     let crate::state::Phase::Unlocked(vault) = &mut inner.phase else {

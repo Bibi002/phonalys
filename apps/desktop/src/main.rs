@@ -78,6 +78,7 @@ async fn start_server(web_dir: Option<PathBuf>) -> Result<Url, BoxError> {
             origins: vec![origin.clone()],
         },
         web_dir,
+        backup_dir: data_dir.join("sauvegardes"),
     });
     spawn_auto_lock(state.clone());
     let router = app(state);

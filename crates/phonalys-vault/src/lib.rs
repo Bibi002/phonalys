@@ -26,7 +26,7 @@ use phonalys_crypto::{
     derive_kek, generate_salt, open, seal, unwrap_key, wrap_key, CryptoError, KdfParams, SecretKey,
     SALT_LEN,
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::path::Path;
 use time::OffsetDateTime;
 use zeroize::Zeroizing;
@@ -505,7 +505,92 @@ impl UnlockedVault {
     }
 }
 
+/// Résultat de la vérification d'une sauvegarde.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackupReport {
+    /// Enregistrements déchiffrés avec succès.
+    pub records: usize,
+    /// Entrées du journal d'audit, chaîne vérifiée.
+    pub audit_entries: usize,
+}
+
+impl UnlockedVault {
+    /// Copie cohérente du coffre (SQLite `VACUUM INTO`), même pendant son utilisation.
+    /// La copie est aussi chiffrée que l'original : sans la phrase de passe (et, en mode
+    /// lié, une clé ou un code de récupération), elle est illisible.
+    pub fn snapshot(&self, dest: &Path) -> Result<(), VaultError> {
+        if dest.exists() {
+            return Err(VaultError::AlreadyExists);
+        }
+        let dest_str = dest
+            .to_str()
+            .ok_or(VaultError::Precondition("chemin de sauvegarde non UTF-8"))?;
+        self.conn.execute("VACUUM INTO ?1", [dest_str])?;
+        restrict_permissions(dest).map_err(|e| VaultError::Integrity(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Test de restauration : ouvre la sauvegarde en lecture seule, déchiffre **chaque**
+    /// enregistrement et vérifie la chaîne du journal d'audit.
+    pub fn verify_backup(&self, path: &Path) -> Result<BackupReport, VaultError> {
+        let conn = open_read_only(path)?;
+        let format: i64 =
+            conn.query_row("SELECT format FROM meta WHERE id = 1", [], |r| r.get(0))?;
+        if format != FORMAT_VERSION {
+            return Err(VaultError::UnsupportedFormat(format));
+        }
+        let mut stmt = conn.prepare("SELECT kind, id, wrapped_dek, sealed FROM records")?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Vec<u8>>(2)?,
+                    r.get::<_, Vec<u8>>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (kind, id, wrapped, sealed) in &rows {
+            let dek = unwrap_key(&self.master, wrapped, &dek_context(kind, id))?;
+            drop(Zeroizing::new(open(&dek, sealed, &record_aad(kind, id))?));
+        }
+        let audit = LockedVault::load_audit(&conn, &self.master)?;
+        Ok(BackupReport {
+            records: rows.len(),
+            audit_entries: audit.entries().len(),
+        })
+    }
+}
+
+fn open_read_only(path: &Path) -> Result<Connection, VaultError> {
+    if !path.is_file() {
+        return Err(VaultError::NotFound);
+    }
+    Ok(Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?)
+}
+
 impl LockedVault {
+    /// Contrôle sommaire d'un fichier avant restauration : c'est bien un coffre Phonalys
+    /// d'un format connu. Son contenu reste illisible sans les facteurs d'origine.
+    pub fn inspect(path: &Path) -> Result<(), VaultError> {
+        let conn =
+            open_read_only(path).map_err(|_| VaultError::Integrity("fichier illisible".into()))?;
+        let format: i64 = conn
+            .query_row("SELECT format FROM meta WHERE id = 1", [], |r| r.get(0))
+            .map_err(|_| VaultError::Integrity("ce fichier n'est pas un coffre Phonalys".into()))?;
+        if !(1..=FORMAT_VERSION).contains(&format) {
+            return Err(VaultError::UnsupportedFormat(format));
+        }
+        let ok: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+        if ok != "ok" {
+            return Err(VaultError::Integrity("fichier endommagé".into()));
+        }
+        Ok(())
+    }
+
     /// Recharge le journal d'audit et vérifie sa chaîne : un journal altéré bloque l'ouverture.
     fn load_audit(conn: &Connection, master: &SecretKey) -> Result<AuditLog, VaultError> {
         let audit_key = get_secret(conn, master, AUDIT_KEY_SECRET)?

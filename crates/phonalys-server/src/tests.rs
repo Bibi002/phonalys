@@ -32,6 +32,7 @@ impl Harness {
         std::fs::write(web.join("assets/app.js"), "console.log(1)").unwrap();
         let (state, token) = AppState::new(Config {
             web_dir: Some(web),
+            backup_dir: dir.path().join("sauvegardes"),
             vault_path: dir.path().join("cabinet.phonalys-vault"),
             kdf: KdfParams::insecure_for_tests(),
             sessions: SessionConfig::default(),
@@ -1623,4 +1624,200 @@ async fn audit_log_is_readable_and_pseudonymous() {
     );
     let (s, _, _) = h.call("GET", "/api/audit", None, None).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+// --- Sauvegardes -----------------------------------------------------------------------------
+
+async fn raw(
+    h: &Harness,
+    method: &str,
+    uri: &str,
+    headers: &[(&str, &str)],
+    body: Vec<u8>,
+    cookie: Option<&str>,
+) -> (StatusCode, Vec<u8>) {
+    let mut req = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("host", "localhost:8443")
+        .header(CSRF_HEADER, "1");
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    if let Some(c) = cookie {
+        req = req.header("cookie", c);
+    }
+    let res = app(h.state.clone())
+        .oneshot(req.body(Body::from(body)).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    (
+        status,
+        to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+}
+
+#[tokio::test]
+async fn backup_verify_download_and_restore_on_a_new_install() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let c = Some(cookie.as_str());
+    let (_, _, p) = h
+        .call(
+            "POST",
+            "/api/patients",
+            Some(json!({ "nom": "Sauvegarde" })),
+            c,
+        )
+        .await;
+    let pid = p["id"].as_str().unwrap().to_owned();
+    h.call(
+        "POST",
+        "/api/records/seance",
+        Some(json!({ "patient_id": pid, "date": "2026-10-25" })),
+        c,
+    )
+    .await;
+
+    let (s, _, entry) = h.call("POST", "/api/backups", None, c).await;
+    assert_eq!(s, StatusCode::OK, "{entry}");
+    assert_eq!(entry["verified"], true);
+    assert_eq!(entry["records"], 2);
+    let name = entry["name"].as_str().unwrap().to_owned();
+
+    let (_, _, st) = h.call("GET", "/api/backups", None, c).await;
+    assert_eq!(st["files"][0]["name"], name.as_str());
+    assert_eq!(st["auto"], true);
+    let (s, _, _) = h
+        .call("POST", &format!("/api/backups/{name}/verify"), None, c)
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    // Aucun autre fichier ne peut être désigné.
+    let (s, _, _) = h
+        .call("GET", "/api/backups/..%2Fcabinet.phonalys-vault", None, c)
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = raw(
+        &h,
+        "GET",
+        &format!("/api/backups/{name}"),
+        &[],
+        vec![],
+        None,
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::UNAUTHORIZED,
+        "téléchargement réservé à une session"
+    );
+    let (s, file) = raw(&h, "GET", &format!("/api/backups/{name}"), &[], vec![], c).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(
+        !String::from_utf8_lossy(&file).contains("Sauvegarde"),
+        "la sauvegarde est chiffrée"
+    );
+
+    // Nouvelle installation : restauration avec le jeton d'installation.
+    let fresh = Harness::new();
+    let (s, _) = raw(
+        &fresh,
+        "POST",
+        "/api/restore",
+        &[("x-phonalys-setup-token", "FAUX")],
+        file.clone(),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let token = fresh.setup_token.clone();
+    let (s, _) = raw(
+        &fresh,
+        "POST",
+        "/api/restore",
+        &[("x-phonalys-setup-token", &token)],
+        b"pas un coffre".to_vec(),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = raw(
+        &fresh,
+        "POST",
+        "/api/restore",
+        &[("x-phonalys-setup-token", &token)],
+        file.clone(),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = raw(
+        &fresh,
+        "POST",
+        "/api/restore",
+        &[("x-phonalys-setup-token", &token)],
+        file,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "une seule restauration");
+
+    let cookie = fresh.login_at(&totp, state::now() + 30).await;
+    let (_, _, list) = fresh
+        .call("GET", "/api/patients", None, Some(&cookie))
+        .await;
+    assert_eq!(list[0]["nom"], "Sauvegarde");
+    let (_, _, seances) = fresh
+        .call("GET", "/api/records/seance", None, Some(&cookie))
+        .await;
+    assert_eq!(seances.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn extra_backup_dir_and_daily_automatic_backup() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let c = Some(cookie.as_str());
+
+    let (s, _, _) = h
+        .call(
+            "PUT",
+            "/api/settings",
+            Some(json!({ "idle_timeout_minutes": 15, "backup_extra_dir": "pas/absolu" })),
+            c,
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let usb = tempfile::tempdir().unwrap();
+    let (s, _, _) = h
+        .call("PUT", "/api/settings", Some(json!({ "idle_timeout_minutes": 15, "backup_extra_dir": usb.path().to_str().unwrap() })), c)
+        .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let t0 = state::now();
+    backup::auto_backup(&h.state, t0);
+    backup::auto_backup(&h.state, t0 + 3600);
+    let (_, _, st) = h.call("GET", "/api/backups", None, c).await;
+    assert_eq!(
+        st["files"].as_array().unwrap().len(),
+        1,
+        "une seule sauvegarde par 24 h"
+    );
+    assert_eq!(st["last"]["copied"], true);
+    assert_eq!(std::fs::read_dir(usb.path()).unwrap().count(), 1);
+
+    backup::auto_backup(&h.state, t0 + backup::AUTO_INTERVAL_SECS + 1);
+    let (_, _, st) = h.call("GET", "/api/backups", None, c).await;
+    assert_eq!(st["files"].as_array().unwrap().len(), 2);
+
+    // Coffre verrouillé : rien n'est fait.
+    h.call("POST", "/api/lock", None, c).await;
+    backup::auto_backup(&h.state, t0 + 3 * backup::AUTO_INTERVAL_SECS);
+    assert_eq!(std::fs::read_dir(usb.path()).unwrap().count(), 2);
 }
