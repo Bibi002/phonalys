@@ -1,0 +1,19 @@
+[package]
+name = "phonalys-ai"
+description = "Passerelle IA de Phonalys : modèles locaux uniquement, politique réseau, pseudonymisation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,65 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/phonalys-crypto",
+    "crates/phonalys-psychometrics",
+    "crates/phonalys-core",
+    "crates/phonalys-ai",
+    "crates/phonalys-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "LicenseRef-Phonalys-Proprietary"
+publish = false
+authors = ["Phonalys"]
+
+[workspace.dependencies]
+phonalys-crypto = { path = "crates/phonalys-crypto" }
+phonalys-psychometrics = { path = "crates/phonalys-psychometrics" }
+phonalys-core = { path = "crates/phonalys-core" }
+phonalys-ai = { path = "crates/phonalys-ai" }
+
+argon2 = { version = "0.5", features = ["std"] }
+chacha20poly1305 = "0.10"
+rand_core = { version = "0.6", features = ["getrandom"] }
+zeroize = { version = "1.8", features = ["derive"] }
+subtle = "2.6"
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+time = { version = "0.3", features = ["serde", "macros", "formatting", "parsing"] }
+libm = "0.2"
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["set-header", "limit", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+proptest = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "deny"
+dbg_macro = "deny"
+todo = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+overflow-checks = true

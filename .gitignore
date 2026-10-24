@@ -1,0 +1,16 @@
+/target
+node_modules/
+dist/
+*.log
+
+# Données et secrets : ne jamais versionner
+*.db
+*.db-*
+*.sqlite
+*.phonalys-vault
+*.pem
+*.key
+*.p12
+.env
+.env.*
+/data/
