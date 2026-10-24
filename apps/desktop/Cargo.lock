@@ -2995,7 +2995,7 @@ dependencies = [
 name = "phonalys-auth"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "data-encoding",
  "hmac 0.12.1",
  "phonalys-crypto",
@@ -3114,7 +3114,7 @@ dependencies = [
 name = "phonalys-webauthn"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "ciborium",
  "ed25519-dalek",
  "p256",
