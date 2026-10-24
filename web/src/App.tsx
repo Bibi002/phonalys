@@ -14,6 +14,7 @@ import { Patients } from "./screens/Patients";
 import { Security } from "./screens/Security";
 import { Settings } from "./screens/Settings";
 import { Setup } from "./screens/Setup";
+import { t, useLang } from "./i18n";
 import { webauthnAvailable } from "./webauthn";
 
 type Phase = "loading" | "setup" | "login" | "open" | "offline";
@@ -47,6 +48,8 @@ export function App() {
   const [idle, setIdle] = useState(900);
   const [hiddenLock, setHiddenLock] = useState(300);
   const lastActivity = useRef(Date.now());
+  const mainRef = useRef<HTMLElement>(null);
+  useLang();
 
   const refresh = useCallback(async () => {
     try {
@@ -124,17 +127,19 @@ export function App() {
     setPage(p);
     setPatientId(id);
     window.scrollTo?.(0, 0);
+    // Les lecteurs d'écran annoncent la nouvelle page au lieu de rester sur le menu.
+    requestAnimationFrame(() => mainRef.current?.focus({ preventScroll: true }));
   }, []);
 
   if (pairing) return <Pairing onDone={() => setPairing(false)} />;
-  if (phase === "loading") return <main className="narrow"><p className="muted">Connexion au serveur…</p></main>;
+  if (phase === "loading") return <main className="narrow"><p className="muted">{t("Connexion au serveur…")}</p></main>;
   if (phase === "offline")
     return (
       <main className="narrow">
         <section className="card">
-          <h1>Serveur injoignable</h1>
-          <p>Vérifiez que le serveur Phonalys du cabinet est démarré et que cet appareil est sur le même réseau.</p>
-          <button type="button" onClick={() => void refresh()}>Réessayer</button>
+          <h1>{t("Serveur injoignable")}</h1>
+          <p>{t("Vérifiez que le serveur Phonalys du cabinet est démarré et que cet appareil est sur le même réseau.")}</p>
+          <button type="button" onClick={() => void refresh()}>{t("Réessayer")}</button>
         </section>
       </main>
     );
@@ -143,12 +148,15 @@ export function App() {
 
   return (
     <div className="shell">
+      <a className="skip" href="#contenu">
+        {t("Aller au contenu")}
+      </a>
       <header className="topbar">
         <strong className="brand">Phonalys</strong>
         <SessionTimer idleSecs={idle} lastActivity={lastActivity} onExpired={() => setPhase("login")} />
         <LockButton onLocked={() => setPhase("login")} />
       </header>
-      <nav className="sidebar" aria-label="Navigation principale">
+      <nav className="sidebar" aria-label={t("Navigation principale")}>
         {PAGES.map(([p, label]) => (
           <button
             key={p}
@@ -157,11 +165,11 @@ export function App() {
             aria-current={page === p ? "page" : undefined}
             onClick={() => navigate(p)}
           >
-            {label}
+            {t(label)}
           </button>
         ))}
       </nav>
-      <main className="content">
+      <main className="content" id="contenu" ref={mainRef} tabIndex={-1}>
         {page === "home" && (
           <>
             <BiometricInvite onActivate={() => navigate("security")} />
@@ -194,17 +202,18 @@ export function BiometricInvite({ onActivate }: { onActivate: () => void }) {
   if (!show) return null;
   return (
     <section className="card invite">
-      <h2>Connectez-vous en un geste</h2>
+      <h2>{t("Connectez-vous en un geste")}</h2>
       <p>
-        Activez la connexion biométrique : chaque jour, il suffira de poser le doigt, de montrer votre visage ou
-        d'utiliser Windows Hello. La phrase de passe ne sera redemandée qu'après trois échecs.
+        {t(
+          "Activez la connexion biométrique : chaque jour, il suffira de poser le doigt, de montrer votre visage ou d'utiliser Windows Hello. La phrase de passe ne sera redemandée qu'après trois échecs.",
+        )}
       </p>
       <div className="actions">
         <button type="button" onClick={onActivate}>
-          Activer maintenant
+          {t("Activer maintenant")}
         </button>
         <button type="button" className="ghost" onClick={() => setShow(false)}>
-          Plus tard
+          {t("Plus tard")}
         </button>
       </div>
     </section>
@@ -218,14 +227,14 @@ function LockButton({ onLocked }: { onLocked: () => void }) {
       <button
         type="button"
         className="lock"
-        title="Verrouille immédiatement, sur tous les appareils"
+        title={t("Verrouille immédiatement, sur tous les appareils")}
         onClick={() =>
           api("POST", "/api/lock")
             .then(onLocked)
             .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)))
         }
       >
-        Verrouiller
+        {t("Verrouiller")}
       </button>
       <ErrorBox error={error} />
     </>
@@ -258,18 +267,22 @@ export function SessionTimer(props: {
 
   if (left > WARNING_SECS) {
     return (
-      <span className="timer" title="Sans activité, Phonalys se verrouille pour protéger les dossiers. Délai réglable dans « Réglages ».">
-        Verrouillage auto : {Math.round(props.idleSecs / 60)} min
+      <span className="timer" title={t("Sans activité, Phonalys se verrouille pour protéger les dossiers. Délai réglable dans « Réglages ».")}>
+        {t("Verrouillage auto : {n} min", { n: Math.round(props.idleSecs / 60) })}
       </span>
     );
   }
   const mm = Math.floor(left / 60);
   const ss = String(left % 60).padStart(2, "0");
   return (
-    <span className="timer warn" role="status">
-      Inactif : verrouillage dans {mm}:{ss}
+    <span className="timer warn">
+      {/* Le décompte change chaque seconde : il n'est pas lu ; une seule annonce suffit. */}
+      <span aria-hidden="true">{t("Inactif : verrouillage dans {t}", { t: `${mm}:${ss}` })}</span>
+      <span className="sr-only" role="alert">
+        {t("Phonalys se verrouillera dans deux minutes faute d'activité.")}
+      </span>
       <button type="button" className="ghost" onClick={() => void api("GET", "/api/session").catch(() => undefined)}>
-        Rester connecté
+        {t("Rester connecté")}
       </button>
     </span>
   );

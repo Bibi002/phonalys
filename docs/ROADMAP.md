@@ -31,7 +31,11 @@
 - [x] Interface React/TypeScript servie par le serveur : installation (QR code TOTP généré localement), connexion (clé biométrique avec PRF, TOTP, récupération), patients, sécurité (clés, liaison, politique, mode lié), compte à rebours du verrouillage, verrouillage immédiat
 - [x] Compatible avec la CSP stricte (aucun script ni style en ligne, contrôlé à chaque compilation)
 - [x] PWA : manifest et service worker qui ne met **jamais** en cache les données de l'API
-- [ ] Audit d'accessibilité WCAG 2.2 AA ; traductions néerlandaise et allemande
+- [x] Traduction de l'interface (français, néerlandais, allemand) : accès, installation, appairage, structure, réglages ; contrôle automatique des clés manquantes
+- [x] Accessibilité de base : lien d'évitement, focus déplacé à chaque page, onglets au clavier, aides reliées aux champs, mouvement réduit, compte à rebours annoncé une seule fois
+- [ ] Traduction des écrans cliniques (dossier, bilans, agenda, documents) et des messages d'erreur du serveur ; relecture par des logopèdes néerlandophones et germanophones
+- [ ] Exercices et lexiques néerlandais et allemands (contenus propres à chaque langue, pas des traductions)
+- [ ] Audit d'accessibilité WCAG 2.2 AA externe (lecteurs d'écran NVDA, VoiceOver, TalkBack)
 - [x] Icônes PNG pour iOS (apple-touch-icon)
 - [x] Application de bureau Tauri 2 : serveur embarqué sur la boucle locale (port aléatoire), navigation verrouillée, aucune commande native exposée, jeton d'installation transmis hors réseau
 - [ ] Installateurs **signés** : MSI (Windows), .deb, .rpm et AppImage (Linux) ; mises à jour signées

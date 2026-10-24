@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError, type SetupResult } from "../api";
 import { ErrorBox, Field, PasswordField, RecoveryCodes, useAction } from "../components";
+import { t } from "../i18n";
 
 /**
  * Jeton d'installation transmis par l'application de bureau dans le fragment de l'URL
@@ -39,13 +40,14 @@ function Restore({ token, onDone }: { token: string; onDone: () => void }) {
   const { busy, error, run } = useAction();
   return (
     <div className="restore">
-      <h2>Vous avez déjà une sauvegarde ?</h2>
+      <h2>{t("Vous avez déjà une sauvegarde ?")}</h2>
       <p className="muted">
-        Sur un nouvel ordinateur, restaurez votre fichier <code>.phonalys-backup</code> au lieu de créer un coffre vide.
-        Vous vous connecterez ensuite avec la phrase de passe et le second facteur en vigueur lors de la sauvegarde.
+        {t(
+          "Sur un nouvel ordinateur, restaurez votre fichier .phonalys-backup au lieu de créer un coffre vide. Vous vous connecterez ensuite avec la phrase de passe et le second facteur en vigueur lors de la sauvegarde.",
+        )}
       </p>
       <label className="field">
-        <span>Fichier de sauvegarde</span>
+        <span>{t("Fichier de sauvegarde")}</span>
         <input type="file" accept=".phonalys-backup" onChange={(e) => setFile(e.target.files?.[0])} />
       </label>
       <ErrorBox error={error} />
@@ -60,7 +62,7 @@ function Restore({ token, onDone }: { token: string; onDone: () => void }) {
           })
         }
       >
-        {busy ? "Restauration…" : "Restaurer cette sauvegarde"}
+        {busy ? t("Restauration…") : t("Restaurer cette sauvegarde")}
       </button>
     </div>
   );
@@ -78,7 +80,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
   function submit(e: FormEvent) {
     e.preventDefault();
     if (passphrase !== confirm) {
-      setError("Les deux phrases de passe sont différentes.");
+      setError(t("Les deux phrases de passe sont différentes."));
       return;
     }
     void run(async () => {
@@ -94,23 +96,24 @@ export function Setup({ onDone }: { onDone: () => void }) {
     return (
       <main className="narrow">
         <section className="card">
-          <h1>Second facteur</h1>
+          <h1>{t("Second facteur")}</h1>
           <p>
-            Scannez ce code avec une application d'authentification hors ligne (Aegis, 2FAS, Ente Auth)
-            ou avec votre gestionnaire de mots de passe (Bitwarden, KeePassXC).
+            {t(
+              "Scannez ce code avec une application d'authentification hors ligne (Aegis, 2FAS, Ente Auth) ou avec votre gestionnaire de mots de passe (Bitwarden, KeePassXC).",
+            )}
           </p>
           <img
             className="qr"
-            alt="QR code du second facteur"
+            alt={t("QR code du second facteur")}
             src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(result.totp_qr_svg)}`}
           />
           <details>
-            <summary>Saisie manuelle</summary>
+            <summary>{t("Saisie manuelle")}</summary>
             <code className="secret">{result.totp_secret}</code>
           </details>
-          <p className="muted">Après la première connexion, vous pourrez ajouter une clé biométrique.</p>
+          <p className="muted">{t("Après la première connexion, vous pourrez ajouter une clé biométrique.")}</p>
           <button type="button" onClick={() => setStep("codes")}>
-            C'est fait
+            {t("C'est fait")}
           </button>
         </section>
       </main>
@@ -121,46 +124,47 @@ export function Setup({ onDone }: { onDone: () => void }) {
   return (
     <main className="narrow">
       <form className="card" onSubmit={submit}>
-        <h1>Installation de Phonalys</h1>
+        <h1>{t("Installation de Phonalys")}</h1>
         <p>
-          Vos données restent sur cet appareil, chiffrées. Personne d'autre, pas même l'éditeur, ne peut les
-          lire.
+          {t("Vos données restent sur cet appareil, chiffrées. Personne d'autre, pas même l'éditeur, ne peut les lire.")}
         </p>
         <Field
-          label="Jeton d'installation"
+          label={t("Jeton d'installation")}
           value={token}
           onChange={setToken}
           required
           autoFocus
-          hint="Affiché dans la console au démarrage du serveur."
+          hint={t("Affiché dans la console au démarrage du serveur.")}
         />
-        <Field label="Votre nom (facultatif)" value={name} onChange={setName} autoComplete="name" />
+        <Field label={t("Votre nom (facultatif)")} value={name} onChange={setName} autoComplete="name" />
         <PasswordField
-          label="Phrase de passe"
+          label={t("Phrase de passe")}
           value={passphrase}
           onChange={setPassphrase}
           autoComplete="new-password"
           required
-          hint="Au moins 14 caractères ; idéalement 5 mots ou plus. Un gestionnaire de mots de passe (Bitwarden, KeePassXC) peut la générer et la retenir."
+          hint={t(
+            "Au moins 14 caractères ; idéalement 5 mots ou plus. Un gestionnaire de mots de passe (Bitwarden, KeePassXC) peut la générer et la retenir.",
+          )}
         />
         <PasswordField
-          label="Confirmation"
+          label={t("Confirmation")}
           value={confirm}
           onChange={setConfirm}
           autoComplete="new-password"
           required
         />
         <p className="muted">
-          Si votre navigateur propose de générer ou d'enregistrer un mot de passe, vérifiez avec « Afficher » que
-          c'est bien celui que vous retiendrez.
+          {t(
+            "Si votre navigateur propose de générer ou d'enregistrer un mot de passe, vérifiez avec « Afficher » que c'est bien celui que vous retiendrez.",
+          )}
         </p>
         <p className="warning">
-          Sans cette phrase de passe, le coffre est définitivement illisible. Il n'existe aucune
-          réinitialisation.
+          {t("Sans cette phrase de passe, le coffre est définitivement illisible. Il n'existe aucune réinitialisation.")}
         </p>
         <ErrorBox error={error} />
         <button type="submit" disabled={busy}>
-          {busy ? "Création du coffre…" : "Créer le coffre"}
+          {busy ? t("Création du coffre…") : t("Créer le coffre")}
         </button>
         <Restore token={token} onDone={onDone} />
       </form>

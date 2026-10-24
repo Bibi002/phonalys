@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, type Status } from "../api";
-import { describeError, ErrorBox, Field, PasswordField } from "../components";
+import { describeError, ErrorBox, Field, PasswordField, tabKeys } from "../components";
+import { t } from "../i18n";
 import { describeWebAuthnError, getAssertion, prfSalt, webauthnAvailable } from "../webauthn";
 
 type Method = "passkey" | "totp" | "recovery";
@@ -32,6 +33,12 @@ const NO_PASSKEY =
 
 const STEP_UP =
   "Après 3 échecs, deux vérifications sont demandées pour protéger les dossiers : votre phrase de passe, puis votre clé biométrique ou le code à 6 chiffres.";
+
+const METHODS = [
+  ["passkey", "Clé biométrique"],
+  ["totp", "Code à 6 chiffres"],
+  ["recovery", "Code de récupération"],
+] as const;
 
 const describe = (e: unknown) => (e instanceof DOMException ? describeWebAuthnError(e) : describeError(e));
 const isStepUp = (e: unknown) => e instanceof ApiError && /deux vérifications/.test(e.message);
@@ -84,7 +91,7 @@ function QuickLogin(props: { onLoggedIn: () => void; onStepUp: () => void; onOth
     try {
       const options = await api<Record<string, unknown>>("POST", "/api/login/quick/start");
       const { response, prfOutput } = await getAssertion(options);
-      if (!prfOutput) throw new Error("Cet appareil ne fournit pas l'extension PRF : utilisez une autre méthode.");
+      if (!prfOutput) throw new Error(t("Cet appareil ne fournit pas l'extension PRF : utilisez une autre méthode."));
       await api("POST", "/api/login/quick/finish", { response, prf_output: prfOutput });
       rememberMethod("passkey");
       props.onLoggedIn();
@@ -99,14 +106,14 @@ function QuickLogin(props: { onLoggedIn: () => void; onStepUp: () => void; onOth
   return (
     <section className="card login-quick">
       <h1>Phonalys</h1>
-      <p className="muted">Vos données sont chiffrées. Identifiez-vous pour les ouvrir.</p>
+      <p className="muted">{t("Vos données sont chiffrées. Identifiez-vous pour les ouvrir.")}</p>
       <button type="button" className="big" disabled={busy} onClick={() => void go()} autoFocus>
-        {busy ? "Vérification…" : "Se connecter avec ma clé biométrique"}
+        {busy ? t("Vérification…") : t("Se connecter avec ma clé biométrique")}
       </button>
-      <p className="muted">Empreinte, visage ou Windows Hello : un seul geste suffit.</p>
+      <p className="muted">{t("Empreinte, visage ou Windows Hello : un seul geste suffit.")}</p>
       <ErrorBox error={error} />
       <button type="button" className="ghost" onClick={props.onOther}>
-        Utiliser une autre méthode
+        {t("Utiliser une autre méthode")}
       </button>
     </section>
   );
@@ -132,7 +139,7 @@ function FullLogin(props: { onLoggedIn: () => void; stepUp: boolean; onQuick: ((
       const { response, prfOutput } = await getAssertion(options);
       if (prfSalt(options) && !prfOutput) {
         throw new Error(
-          "Ce coffre est lié au matériel, mais cet appareil ou ce navigateur ne fournit pas l'extension PRF. Utilisez une clé liée ou un code de récupération.",
+          t("Ce coffre est lié au matériel, mais cet appareil ou ce navigateur ne fournit pas l'extension PRF. Utilisez une clé liée ou un code de récupération."),
         );
       }
       await api("POST", "/api/login/passkey/finish", prfOutput ? { response, prf_output: prfOutput } : { response });
@@ -157,7 +164,7 @@ function FullLogin(props: { onLoggedIn: () => void; stepUp: boolean; onQuick: ((
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 400 && /aucune clé biométrique/.test(err.message)) {
           setMethod("totp");
-          setError(NO_PASSKEY);
+          setError(t(NO_PASSKEY));
           return;
         }
         setBlocked(err instanceof ApiError && (err.status === 429 || /bloquée/.test(err.message)));
@@ -169,40 +176,40 @@ function FullLogin(props: { onLoggedIn: () => void; stepUp: boolean; onQuick: ((
   return (
     <form className="card" onSubmit={submit}>
       <h1>Phonalys</h1>
-      <p className="muted">Vos données sont chiffrées. Identifiez-vous pour les ouvrir.</p>
-      {props.stepUp && <p className="warning">{STEP_UP}</p>}
-      <div className="tabs" role="tablist" aria-label="Second facteur">
-        {(
-          [
-            ["passkey", "Clé biométrique"],
-            ["totp", "Code à 6 chiffres"],
-            ["recovery", "Code de récupération"],
-          ] as const
-        ).map(([m, label]) => (
+      <p className="muted">{t("Vos données sont chiffrées. Identifiez-vous pour les ouvrir.")}</p>
+      {props.stepUp && <p className="warning">{t(STEP_UP)}</p>}
+      <div
+        className="tabs"
+        role="tablist"
+        aria-label={t("Second facteur")}
+        onKeyDown={tabKeys(METHODS.map(([m]) => m), method, choose)}
+      >
+        {METHODS.map(([m, label]) => (
           <button
             key={m}
             type="button"
             role="tab"
+            tabIndex={method === m ? 0 : -1}
             aria-selected={method === m}
             className={method === m ? "tab active" : "tab"}
             onClick={() => choose(m)}
           >
-            {label}
+            {t(label)}
           </button>
         ))}
       </div>
       <PasswordField
-        label="Phrase de passe"
+        label={t("Phrase de passe")}
         value={passphrase}
         onChange={setPassphrase}
         autoComplete="current-password"
         required
         autoFocus
-        hint="Celle choisie à l'installation, exactement (majuscules, accents et espaces comptent)."
+        hint={t("Celle choisie à l'installation, exactement (majuscules, accents et espaces comptent).")}
       />
       {method === "totp" && (
         <Field
-          label="Code de l'application d'authentification"
+          label={t("Code de l'application d'authentification")}
           value={code}
           onChange={setCode}
           autoComplete="one-time-code"
@@ -212,36 +219,37 @@ function FullLogin(props: { onLoggedIn: () => void; stepUp: boolean; onQuick: ((
       )}
       {method === "recovery" && (
         <Field
-          label="Code de récupération"
+          label={t("Code de récupération")}
           value={code}
           onChange={setCode}
           required
-          hint="Format XXXX-XXXX-XXXX-XXXX. Chaque code ne sert qu'une fois et débloque aussi une connexion bloquée."
+          hint={t("Format XXXX-XXXX-XXXX-XXXX. Chaque code ne sert qu'une fois et débloque aussi une connexion bloquée.")}
         />
       )}
       {method === "passkey" && (
         <p className="muted">
-          Après la phrase de passe, votre appareil demande l'empreinte, le visage ou le code Windows Hello. La clé sert
-          à chaque connexion, sans limite.
+          {t(
+            "Après la phrase de passe, votre appareil demande l'empreinte, le visage ou le code Windows Hello. La clé sert à chaque connexion, sans limite.",
+          )}
         </p>
       )}
       {method === "passkey" && !webauthnAvailable() && (
         <p className="warning">
-          Les clés biométriques exigent une connexion HTTPS avec un nom de domaine et un certificat reconnu.
+          {t("Les clés biométriques exigent une connexion HTTPS avec un nom de domaine et un certificat reconnu.")}
         </p>
       )}
       <ErrorBox error={error} />
       {blocked && method !== "recovery" && (
         <button type="button" className="ghost" onClick={() => choose("recovery")}>
-          Débloquer avec un code de récupération
+          {t("Débloquer avec un code de récupération")}
         </button>
       )}
       <button type="submit" disabled={busy}>
-        {busy ? "Vérification…" : method === "passkey" ? "Continuer avec ma clé" : "Déverrouiller"}
+        {busy ? t("Vérification…") : method === "passkey" ? t("Continuer avec ma clé") : t("Déverrouiller")}
       </button>
       {props.onQuick && (
         <button type="button" className="ghost" onClick={props.onQuick}>
-          Revenir à la connexion en un geste
+          {t("Revenir à la connexion en un geste")}
         </button>
       )}
     </form>

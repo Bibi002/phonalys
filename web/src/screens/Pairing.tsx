@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { t } from "../i18n";
 
 interface PairingInfo {
   available: boolean;
@@ -36,25 +37,26 @@ export function PairingSection() {
   }, []);
   return (
     <section className="card">
-      <h2>Téléphones et tablettes</h2>
+      <h2>{t("Téléphones et tablettes")}</h2>
       {unavailable || !qr ? (
         <p className="muted">
           {unavailable
-            ? "Cette installation n'est accessible que depuis cet ordinateur. Pour connecter un téléphone, lancez le serveur du cabinet (phonalys-server) sur le réseau local : voir le guide d'installation."
-            : "Chargement…"}
+            ? t("Cette installation n'est accessible que depuis cet ordinateur. Pour connecter un téléphone, lancez le serveur du cabinet (phonalys-server) sur le réseau local : voir le guide d'installation.")
+            : t("Chargement…")}
         </p>
       ) : (
         <>
           <p>
-            Scannez ce code avec l'appareil photo du téléphone, puis suivez les étapes affichées. L'appareil installe
-            une seule fois l'autorité du cabinet ; elle ne vaut que pour les adresses du réseau local.
+            {t(
+              "Scannez ce code avec l'appareil photo du téléphone, puis suivez les étapes affichées. L'appareil installe une seule fois l'autorité du cabinet ; elle ne vaut que pour les adresses du réseau local.",
+            )}
           </p>
           <div className="pairing">
-            <img className="qr" alt={`QR code vers ${qr.url}`} src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(qr.qr_svg)}`} />
+            <img className="qr" alt={t("QR code vers {url}", { url: qr.url })} src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(qr.qr_svg)}`} />
             <div>
-              <p className="muted small">Adresse : {qr.url.replace("/#appairage", "")}</p>
+              <p className="muted small">{t("Adresse : {url}", { url: qr.url.replace("/#appairage", "") })}</p>
               <p>
-                Empreinte à comparer sur le téléphone :<br />
+                {t("Empreinte à comparer sur le téléphone :")}<br />
                 <code className="fingerprint">{qr.ca_fingerprint}</code>
               </p>
             </div>
@@ -80,60 +82,63 @@ export function Pairing({ onDone }: { onDone: () => void }) {
   return (
     <main className="narrow">
       <section className="card">
-        <h1>Connecter cet appareil au cabinet</h1>
-        {error && <p className="error">Serveur injoignable : vérifiez que l'appareil est sur le réseau du cabinet.</p>}
-        {info && !info.available && <p>Ce serveur n'accepte pas d'autres appareils (installation limitée à l'ordinateur).</p>}
+        <h1>{t("Connecter cet appareil au cabinet")}</h1>
+        {error && <p className="error">{t("Serveur injoignable : vérifiez que l'appareil est sur le réseau du cabinet.")}</p>}
+        {info && !info.available && <p>{t("Ce serveur n'accepte pas d'autres appareils (installation limitée à l'ordinateur).")}</p>}
         {info?.available && (
           <>
             <p>
-              Étape 1 : vérifiez que l'empreinte ci-dessous est <strong>identique</strong> à celle affichée sur
-              l'ordinateur du cabinet (écran Sécurité). Si elle diffère, arrêtez-vous : quelqu'un s'interpose.
+              {t(
+                "Étape 1 : vérifiez que l'empreinte ci-dessous est identique à celle affichée sur l'ordinateur du cabinet (écran Sécurité). Si elle diffère, arrêtez-vous : quelqu'un s'interpose.",
+              )}
             </p>
             <p>
               <code className="fingerprint">{fp}</code>
               <br />
-              <span className="muted small">En abrégé : {shortFingerprint(fp)}</span>
+              <span className="muted small">{t("En abrégé : {fp}", { fp: shortFingerprint(fp) })}</span>
             </p>
             {os === "ios" && (
               <ol className="steps">
                 <li>
-                  <a className="button" href="/api/pairing/phonalys.mobileconfig">Télécharger le profil</a> puis
-                  « Autoriser ».
+                  <a className="button" href="/api/pairing/phonalys.mobileconfig">{t("Télécharger le profil")}</a>{" "}
+                  {t("Puis touchez « Autoriser ».")}
                 </li>
-                <li>Réglages › Profil téléchargé › Installer (code de l'appareil demandé).</li>
+                <li>{t("Réglages › Profil téléchargé › Installer (code de l'appareil demandé).")}</li>
                 <li>
-                  Réglages › Général › Informations › <em>Réglages des certificats</em> : activez « Phonalys - autorité
-                  locale du cabinet ». Vérifiez-y l'empreinte SHA-256.
+                  {t(
+                    "Réglages › Général › Informations › Réglages des certificats : activez « Phonalys - autorité locale du cabinet ». Vérifiez-y l'empreinte SHA-256.",
+                  )}
                 </li>
-                <li>Revenez ici et touchez « Continuer ».</li>
+                <li>{t("Revenez ici et touchez « Continuer ».")}</li>
               </ol>
             )}
             {os === "android" && (
               <ol className="steps">
                 <li>
-                  <a className="button" href="/api/pairing/ca.crt">Télécharger le certificat</a>
+                  <a className="button" href="/api/pairing/ca.crt">{t("Télécharger le certificat")}</a>
                 </li>
                 <li>
-                  Paramètres › Sécurité › Chiffrement et identifiants › Installer un certificat › <em>Certificat CA</em>,
-                  puis choisissez « phonalys-cabinet.crt ». (Le chemin varie selon le fabricant : cherchez « certificat
-                  CA » dans les paramètres.)
+                  {t(
+                    "Paramètres › Sécurité › Chiffrement et identifiants › Installer un certificat › Certificat CA, puis choisissez « phonalys-cabinet.crt ». (Le chemin varie selon le fabricant : cherchez « certificat CA » dans les paramètres.)",
+                  )}
                 </li>
-                <li>Revenez ici et touchez « Continuer ».</li>
+                <li>{t("Revenez ici et touchez « Continuer ».")}</li>
               </ol>
             )}
             {os === "autre" && (
               <ol className="steps">
                 <li>
-                  <a className="button" href="/api/pairing/ca.crt">Télécharger le certificat</a> (ou le{" "}
-                  <a href="/api/pairing/phonalys.mobileconfig">profil pour Mac</a>).
+                  <a className="button" href="/api/pairing/ca.crt">{t("Télécharger le certificat")}</a>{" "}
+                  <a href="/api/pairing/phonalys.mobileconfig">{t("Profil pour Mac")}</a>
                 </li>
-                <li>Installez-le comme autorité racine de confiance du système ou du navigateur.</li>
-                <li>Rechargez cette page : le navigateur ne doit plus afficher d'avertissement.</li>
+                <li>{t("Installez-le comme autorité racine de confiance du système ou du navigateur.")}</li>
+                <li>{t("Rechargez cette page : le navigateur ne doit plus afficher d'avertissement.")}</li>
               </ol>
             )}
             <p className="muted small">
-              Ensuite, ajoutez Phonalys à l'écran d'accueil (Partager › Sur l'écran d'accueil sur iPhone, menu ⋮ ›
-              Installer l'application sur Android) et activez la connexion biométrique dans « Sécurité ».
+              {t(
+                "Ensuite, ajoutez Phonalys à l'écran d'accueil (Partager › Sur l'écran d'accueil sur iPhone, menu ⋮ › Installer l'application sur Android) et activez la connexion biométrique dans « Sécurité ».",
+              )}
             </p>
           </>
         )}
@@ -144,7 +149,7 @@ export function Pairing({ onDone }: { onDone: () => void }) {
             onDone();
           }}
         >
-          Continuer
+          {t("Continuer")}
         </button>
       </section>
     </main>
