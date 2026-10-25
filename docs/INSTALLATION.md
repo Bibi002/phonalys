@@ -95,3 +95,4 @@ L'écran « Conformité » génère le registre des traitements, la notice à re
 - **« Serveur injoignable »** : vérifiez que le serveur tourne et que l'appareil est sur le réseau du cabinet.
 - **Phrase de passe oubliée** : connectez-vous avec un code de récupération.
 - **Ordinateur ou téléphone perdu** : suivez « Conformité › Violation de données ».
+- **Faille de sécurité ou comportement suspect** : écrivez à phonalys@proton.me, sans publier les détails avant le correctif.

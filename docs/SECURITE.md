@@ -105,4 +105,4 @@ Ce drapeau signifie « vérifié par biométrie **ou** par le code PIN de l'appa
 
 ## Signaler une vulnérabilité
 
-Écrire à [ADRESSE SÉCURITÉ À DÉFINIR]. Merci de ne pas publier la faille avant son correctif. Nous nous engageons à répondre sous 72 h.
+Écrire à **phonalys@proton.me** (Proton Mail : chiffrement de bout en bout avec une autre adresse Proton). Merci de ne pas publier la faille avant son correctif. Nous nous engageons à répondre sous 72 h.
