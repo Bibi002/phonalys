@@ -65,7 +65,7 @@ Si le jeton est absent ou a expiré, le workflow « Diffusion publique » échou
 ### Copie manuelle (secours)
 
 ```powershell
-$v = "0.1.2"; $d = "$env:TEMP\phonalys-$v"
+$v = "0.1.3"; $d = "$env:TEMP\phonalys-$v"
 gh release download "v$v" -R Bibi002/phonalys -D $d
 Get-Content "$d\SHA256SUMS.txt" | % { $h, $n = $_ -split '\s+', 2; if ((Get-FileHash "$d\$n").Hash -ne $h) { throw "Empreinte différente : $n" } }
 Copy-Item docs\INSTALLATION.md $d

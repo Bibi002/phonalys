@@ -2,7 +2,7 @@
 
 Guide destiné au praticien. Phonalys fonctionne entièrement chez vous : aucun compte en ligne, aucune donnée envoyée à l'éditeur.
 
-Remplacez `<version>` par le numéro de la version téléchargée (par exemple `0.1.2`).
+Remplacez `<version>` par le numéro de la version téléchargée (par exemple `0.1.3`).
 
 ## 1. Choisir son installation
 
@@ -84,7 +84,7 @@ Au démarrage, l'application de bureau vérifie s'il existe une nouvelle version
 
 Cette vérification n'envoie aucune information sur le cabinet. Pour la désactiver (poste géré par un informaticien), créez un fichier vide nommé `mises-a-jour-desactivees` dans le dossier de données (`%LOCALAPPDATA%\Phonalys` ou `~/.local/share/Phonalys`).
 
-Les paquets `.deb` et `.rpm` et le serveur du cabinet se mettent à jour en installant la nouvelle version par-dessus l'ancienne. Les versions 0.1.0 et 0.1.1 ne savent pas encore se mettre à jour : installez une fois la version suivante à la main.
+Les paquets `.deb` et `.rpm` et le serveur du cabinet se mettent à jour en installant la nouvelle version par-dessus l'ancienne. Les versions 0.1.0 à 0.1.2 ne savent pas se mettre à jour : installez une fois la 0.1.3 (ou plus récente) à la main.
 
 ## 5. Sauvegardes
 
