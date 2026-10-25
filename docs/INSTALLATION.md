@@ -2,7 +2,7 @@
 
 Guide destiné au praticien. Phonalys fonctionne entièrement chez vous : aucun compte en ligne, aucune donnée envoyée à l'éditeur.
 
-Remplacez `<version>` par le numéro de la version téléchargée (par exemple `0.1.1`).
+Remplacez `<version>` par le numéro de la version téléchargée (par exemple `0.1.2`).
 
 ## 1. Choisir son installation
 
