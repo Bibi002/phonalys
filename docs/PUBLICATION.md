@@ -23,30 +23,49 @@ Il crée un **brouillon** de release : rien n'est visible tant que vous ne l'ave
 
 Pour un essai sans rien publier : *Actions › Publication › Run workflow*. Les fichiers sont alors téléchargeables comme artefacts du workflow.
 
+## Diffusion publique
+
+Le code source reste dans le dépôt **privé** `Bibi002/phonalys`. Les installateurs sont rendus publics dans un dépôt séparé, **`Bibi002/phonalys-releases`** (page de présentation, licence, guide, politique de sécurité, sans aucun code source). Lien à donner aux praticiens : https://github.com/Bibi002/phonalys-releases/releases/latest
+
+Après avoir publié une version dans le dépôt privé, copiez-la vers le dépôt public en vérifiant les empreintes :
+
+```powershell
+$v = "0.1.1"; $d = "$env:TEMP\phonalys-$v"
+gh release download "v$v" -R Bibi002/phonalys -D $d -p "Phonalys*" -p "phonalys-server*" -p "SHA256SUMS.txt"
+# Chaque fichier doit correspondre à SHA256SUMS.txt :
+Get-Content "$d\SHA256SUMS.txt" | % { $h, $n = $_ -split '\s+', 2; if ((Get-FileHash "$d\$n").Hash -ne $h) { throw "Empreinte différente : $n" } }
+Copy-Item docs\INSTALLATION.md $d
+gh release create "v$v" -R Bibi002/phonalys-releases --title "Phonalys $v" --notes-file notes.md --latest (Get-ChildItem $d -File).FullName
+```
+
 ## Signature des installateurs Windows (à faire par le titulaire)
 
-Sans signature, Windows SmartScreen affiche « Windows a protégé votre ordinateur ». Pour signer :
+Sans signature, Windows SmartScreen affiche « Windows a protégé votre ordinateur ». La signature prouve que l'installateur vient bien de vous et n'a pas été modifié. Le certificat est délivré **au nom d'une personne ou d'une entreprise vérifiée** : seul le titulaire peut le demander.
 
-1. Acheter un certificat de signature de code (OV ou EV) au nom du titulaire. Le fournisseur vérifie l'identité ; Phonalys ne peut pas le faire à votre place.
-2. Exporter le certificat en `.pfx`, protégé par un mot de passe fort. Ne jamais le committer : `.gitignore` refuse déjà les fichiers `*.pfx`.
-3. Déposer vous-même les deux secrets du dépôt, sans que personne d'autre ne voie le fichier ni le mot de passe :
-   ```
-   [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\chemin\certificat.pfx")) | gh secret set WINDOWS_CERTIFICATE
-   gh secret set WINDOWS_CERTIFICATE_PASSWORD
-   ```
-   (la seconde commande demande le mot de passe sans l'afficher).
-4. Supprimer la copie locale du `.pfx` si elle n'est pas conservée dans un coffre.
+**Depuis juin 2023, la clé privée d'un certificat de signature de code doit rester dans un module matériel** (clé USB cryptographique ou service de signature en ligne). Un fichier `.pfx` téléchargeable n'est donc plus délivré par les autorités reconnues. Pour signer depuis GitHub Actions, il faut un **service de signature en ligne**. Options à comparer (prix et conditions à vérifier au moment de l'achat) :
 
-L'exécutable et les deux installateurs sont alors signés et horodatés à chaque publication. Le certificat est effacé de la machine de construction à la fin du travail.
+| Service | Principe | À vérifier |
+|---|---|---|
+| **Azure Artifact Signing** (Microsoft, ex-Trusted Signing) | Abonnement mensuel ; Microsoft vérifie l'identité ; action GitHub officielle | Ouverture aux **personnes physiques** et aux entreprises **en Belgique** |
+| **Certum** (autorité polonaise, UE) avec **SimplySign** | Certificat OV, clé dans le nuage Certum | Outil de signature utilisable sur un agent GitHub |
+| **SSL.com** avec **eSigner** | Certificat OV ou EV, signature en ligne, action GitHub | Coût annuel et coût par signature |
 
-Les certificats EV récents sont souvent livrés sur une clé matérielle ou dans un service de signature en ligne, et ne s'exportent pas en `.pfx`. Dans ce cas, il faut adapter `.github/scripts/sign-windows.ps1` à l'outil du fournisseur.
+Une fois le service choisi :
+
+1. Demandez le certificat à votre nom (« M. Baron ») ou au nom de votre entreprise, et passez la vérification d'identité.
+2. Déposez **vous-même** les identifiants du service dans les secrets du dépôt (`gh secret set NOM`, la valeur est demandée sans être affichée). Ne les transmettez à personne, Claude compris.
+3. Demandez ensuite l'adaptation de `.github/scripts/sign-windows.ps1` au service choisi. Le workflow appelle déjà ce script pour l'exécutable et les deux installateurs, ou saute la signature si aucun secret n'est présent.
+
+Le mode actuel par fichier `.pfx` (secrets `WINDOWS_CERTIFICATE` et `WINDOWS_CERTIFICATE_PASSWORD`) ne sert que pour un certificat dont la clé est exportable, par exemple un certificat interne d'entreprise.
+
+**À savoir :** même signé, un nouvel éditeur peut voir l'avertissement SmartScreen pendant quelques semaines, le temps que la réputation du certificat s'établisse auprès de Microsoft.
 
 ## Ce qui reste à faire
 
 - **Mises à jour automatiques** : pas encore intégrées, volontairement. Il vous faut d'abord trancher deux points :
-  1. **Où publier les mises à jour.** Le dépôt est privé : les postes des clients ne peuvent pas lire ses releases. Il faut une adresse publique en HTTPS (un site à vous, ou un second dépôt public ne contenant que les installateurs et le fichier `latest.json`).
+  1. **Où publier les mises à jour.** Le dépôt public `Bibi002/phonalys-releases` peut servir d'adresse : il faudra y publier aussi le fichier `latest.json` produit par Tauri.
   2. **Automatique ou manuel.** Pour un logiciel qui garde des dossiers de santé, une mise à jour silencieuse est un risque autant qu'une protection : si votre compte de publication est compromis, tous les cabinets reçoivent le code de l'attaquant. Proposition : l'application **signale** la nouvelle version et le praticien choisit quand l'installer.
 
   Une fois ces choix faits, il restera à générer la paire de clés de signature des mises à jour (`cargo tauri signer generate`) : vous la générez, la clé privée va seulement dans un secret du dépôt, la clé publique dans `tauri.conf.json`. Ensuite, le plugin `tauri-plugin-updater` peut être branché.
 - **Paquets Linux** : non signés. Vérifier l'empreinte avec `sha256sum -c SHA256SUMS.txt`.
-- **Attestation de provenance (SLSA)** : produite automatiquement si le dépôt devient public. Pour un dépôt privé, elle exige GitHub Enterprise Cloud.
+- **Attestation de provenance (SLSA)** : elle n'est produite que si le dépôt qui construit est public (ou avec GitHub Enterprise Cloud). Le code restant privé, les empreintes SHA-256 font foi.
