@@ -220,7 +220,7 @@ pub async fn upload(
         .map(|p| parse_id(&p).map_err(|_| ApiError::BadRequest("patient_id invalide".into())))
         .transpose()?;
     blocking(move || {
-        state.with_vault(|vault| {
+        state.with_vault_atomic(|vault| {
             if let Some(pid) = &patient_id {
                 match vault.get(PATIENT, pid) {
                     Ok(_) => {}
@@ -327,7 +327,7 @@ pub async fn rename(
         .filter(|c| !c.is_control())
         .take(MAX_CATEGORY_CHARS)
         .collect();
-    state.with_vault(|vault| {
+    state.with_vault_atomic(|vault| {
         let mut meta: DocumentMeta = vault.get_json(META, &id)?;
         meta.name = name;
         meta.category = category;
@@ -355,7 +355,7 @@ pub async fn delete(
 ) -> Result<StatusCode, ApiError> {
     let id = parse_id(&id)?;
     require_elevation(&state, &headers)?;
-    state.with_vault(|vault| {
+    state.with_vault_atomic(|vault| {
         erase(vault, &id)?;
         Ok(StatusCode::NO_CONTENT)
     })

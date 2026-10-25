@@ -226,6 +226,11 @@ pub fn app(state: AppState) -> Router {
             get(passkey::get_policy).put(passkey::put_policy),
         )
         .route("/api/security/hardware-binding", post(passkey::set_binding))
+        .route("/api/security/passphrase", post(passkey::change_passphrase))
+        .route(
+            "/api/security/recovery-codes",
+            post(passkey::regenerate_recovery_codes),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             api::require_session,

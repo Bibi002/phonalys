@@ -282,6 +282,9 @@ pub(crate) fn conclude_login(
         Ok(Some(action)) => {
             vault.reset_lockout()?;
             vault.audit(ACTOR, action, None)?;
+            if let Some(alert) = vault.audit_alert() {
+                tracing::error!(%alert, "journal d'audit altéré : coffre ouvert, alerte affichée");
+            }
             let idle = crate::records::settings(&vault)?.idle_timeout_minutes;
             inner.sessions.set_idle_timeout(idle * 60);
             let token = inner.sessions.create(now);
@@ -415,7 +418,7 @@ pub async fn create_patient(
     if !data.is_object() {
         return Err(ApiError::BadRequest("objet JSON attendu".into()));
     }
-    state.with_vault(|vault| {
+    state.with_vault_atomic(|vault| {
         let id = UnlockedVault::new_id();
         vault.put_json(PATIENT, &id, &data)?;
         vault.audit(ACTOR, AuditAction::PatientCreated, Some(&id))?;
@@ -461,7 +464,7 @@ pub async fn update_patient(
     if !data.is_object() {
         return Err(ApiError::BadRequest("objet JSON attendu".into()));
     }
-    state.with_vault(|vault| {
+    state.with_vault_atomic(|vault| {
         // Un identifiant inconnu ne crée pas de dossier.
         let _: Value = vault.get_json(PATIENT, &id)?;
         vault.put_json(PATIENT, &id, &data)?;
@@ -475,7 +478,7 @@ pub async fn delete_patient(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let id = parse_id(&id)?;
-    state.with_vault(|vault| {
+    state.with_vault_atomic(|vault| {
         // Le dossier doit exister avant d'effacer quoi que ce soit.
         let _: Value = vault.get_json(PATIENT, &id)?;
         crate::records::erase_patient_records(vault, &id)?;

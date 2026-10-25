@@ -12,11 +12,11 @@
 
 ## Phase 2 — Coffre et comptes ✅ (en cours)
 - [x] Coffre SQLite chiffré : une clé par enregistrement, AAD, `secure_delete`, permissions restreintes
-- [x] Journal d'audit persistant, vérifié à chaque ouverture (un journal altéré bloque l'ouverture)
+- [x] Journal d'audit persistant, vérifié à chaque ouverture, avec ancrage de la dernière entrée ; un journal altéré déclenche une alerte sans bloquer l'accès aux dossiers
 - [x] Phrase de passe : 14 caractères minimum, robustesse évaluée par zxcvbn, informations personnelles refusées
 - [x] TOTP (RFC 6238) avec protection contre le rejeu, 10 codes de récupération à usage unique
-- [x] Délai exponentiel après échecs (phrase de passe **et** second facteur)
-- [x] Sessions : jeton de 256 bits haché, inactivité 5 min, durée maximale 8 h, verrouillage automatique
+- [x] Blocage de 15 min après 4 échecs (phrase de passe **et** second facteur)
+- [x] Sessions : jeton de 256 bits haché, inactivité réglable (15 min par défaut), durée maximale 8 h, verrouillage automatique
 - [x] Serveur : jeton d'installation à usage unique, cookie `__Host-`, protection CSRF (en-tête et origine)
 - [x] TLS 1.3 uniquement (rustls), certificat auto-signé, empreinte affichée
 - [x] **WebAuthn / FIDO2 biométrique** : vérification de l'utilisateur obligatoire, ES256 et Ed25519, détection des clones, politique « clé obligatoire »
@@ -25,7 +25,8 @@
 - [x] Sauvegardes chiffrées, test de restauration automatique, copie 3-2-1, restauration sur une nouvelle installation
 - [ ] Migrations de schéma
 - [x] Appairage des appareils par QR code, autorité locale à contrainte de noms, profil iOS et certificat Android
-- [ ] Changement de phrase de passe et régénération des codes de récupération via l'API
+- [x] Changement de phrase de passe et régénération des codes de récupération
+- [x] Écritures tout ou rien (données et journal), instance unique par coffre, saisie conservée après un verrouillage automatique
 
 ## Phase 3 — Interfaces
 - [x] Interface React/TypeScript servie par le serveur : installation (QR code TOTP généré localement), connexion (clé biométrique avec PRF, TOTP, récupération), patients, sécurité (clés, liaison, politique, mode lié), compte à rebours du verrouillage, verrouillage immédiat

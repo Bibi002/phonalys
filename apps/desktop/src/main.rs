@@ -19,9 +19,11 @@ mod update;
 use phonalys_auth::SessionConfig;
 use phonalys_crypto::KdfParams;
 use phonalys_server::{app, spawn_auto_lock, AppState, Config};
+use phonalys_vault::InstanceLock;
 use phonalys_webauthn::RelyingParty;
 use std::path::PathBuf;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
@@ -63,9 +65,10 @@ fn web_dir(app: &tauri::App) -> Option<PathBuf> {
 }
 
 /// Démarre le serveur embarqué et renvoie l'adresse de la page à ouvrir.
-async fn start_server(web_dir: Option<PathBuf>) -> Result<Url, BoxError> {
+async fn start_server(web_dir: Option<PathBuf>) -> Result<(Url, InstanceLock), BoxError> {
     let data_dir = data_dir().ok_or("dossier de données introuvable")?;
     create_private_dir(&data_dir)?;
+    let instance = InstanceLock::acquire(&data_dir.join("cabinet.phonalys-vault"))?;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
@@ -102,7 +105,7 @@ async fn start_server(web_dir: Option<PathBuf>) -> Result<Url, BoxError> {
         url.set_fragment(Some(&format!("setup={token}")));
     }
     tracing::info!(%port, "serveur embarqué à l'écoute de la boucle locale");
-    Ok(url)
+    Ok((url, instance))
 }
 
 fn main() {
@@ -121,7 +124,19 @@ fn main() {
             if web.is_none() {
                 tracing::error!("interface web introuvable : compilez `web/` (npm run build)");
             }
-            let url = tauri::async_runtime::block_on(start_server(web))?;
+            let (url, instance) = match tauri::async_runtime::block_on(start_server(web)) {
+                Ok(started) => started,
+                Err(e) => {
+                    app.dialog()
+                        .message(e.to_string())
+                        .title("Phonalys")
+                        .kind(MessageDialogKind::Error)
+                        .blocking_show();
+                    return Err(e);
+                }
+            };
+            // Gardé jusqu'à la fermeture de l'application.
+            app.manage(instance);
             let allowed = url.origin();
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))

@@ -3172,6 +3172,7 @@ dependencies = [
  "phonalys-auth",
  "phonalys-crypto",
  "phonalys-server",
+ "phonalys-vault",
  "phonalys-webauthn",
  "serde_json",
  "tauri",

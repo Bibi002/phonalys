@@ -280,7 +280,7 @@ function Aipd({ c }: { c: Cabinet }) {
             </tr>
             <tr>
               <td>Oubli de la phrase de passe</td>
-              <td>Codes de récupération à usage unique, conservés hors ligne</td>
+              <td>Aucune récupération technique possible (chiffrement sans porte dérobée) : phrase de passe notée sur papier et conservée en lieu sûr au cabinet ; les codes de récupération ne couvrent que la perte du second facteur</td>
               <td>……</td>
             </tr>
           </tbody>
@@ -343,7 +343,7 @@ function Violation({ c }: { c: Cabinet }) {
         <ol className="steps">
           <li>
             <strong>Limiter les dégâts</strong> : « Verrouiller » (toutes les sessions se ferment), retirer la clé
-            biométrique de l'appareil perdu dans « Sécurité », changer la phrase de passe, isoler le poste infecté du
+            biométrique de l'appareil perdu dans « Sécurité », changer la phrase de passe (« Sécurité › Changer la phrase de passe ») et régénérer les codes de récupération s'ils ont pu être vus, isoler le poste infecté du
             réseau.
           </li>
           <li>

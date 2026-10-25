@@ -129,7 +129,7 @@ pub async fn put_settings(
     // Contrôle immédiat de l'adresse, résolution comprise : une IA en ligne ou une
     // adresse publique n'est même pas enregistrable. Elle est revérifiée à chaque appel.
     new.engine().resolve().await.map_err(ai_error)?;
-    state.with_vault(|vault| {
+    state.with_vault_atomic(|vault| {
         vault.put_secret(AI_SETTINGS, &serde_json::to_vec(&new)?)?;
         vault.audit(ACTOR, AuditAction::SettingsChanged, Some("ia"))?;
         Ok(())

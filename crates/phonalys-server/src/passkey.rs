@@ -330,6 +330,8 @@ pub struct SecurityStatus {
     bound_passkeys: usize,
     quick_passkeys: usize,
     recovery_codes_remaining: usize,
+    /// Altération du journal d'audit constatée à l'ouverture du coffre.
+    audit_alert: Option<String>,
 }
 
 pub async fn status(State(state): State<AppState>) -> Result<Json<SecurityStatus>, ApiError> {
@@ -341,6 +343,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<SecurityStatus
             bound_passkeys: vault.factor_ids(FactorKind::Passkey)?.len(),
             quick_passkeys: vault.factor_ids(FactorKind::Quick)?.len(),
             recovery_codes_remaining: vault.factor_ids(FactorKind::Recovery)?.len(),
+            audit_alert: vault.audit_alert().map(str::to_owned),
         }))
     })
 }
@@ -393,7 +396,7 @@ pub async fn set_binding(
 ) -> Result<Json<BindingResponse>, ApiError> {
     blocking(move || {
         state.with_vault(|vault| {
-            let pk = vault.password_key(req.passphrase.as_bytes())?;
+            let pk = confirm_passphrase(vault, &req.passphrase)?;
             vault.audit(ACTOR, AuditAction::HardwareBindingChanged, None)?;
             if req.enabled {
                 if vault.factor_ids(FactorKind::Passkey)?.is_empty() {
@@ -421,6 +424,102 @@ pub async fn set_binding(
                     recovery_codes: None,
                 }))
             }
+        })
+    })
+    .await
+}
+
+/// Vérifie la phrase de passe pendant une session. Un échec est compté dans le blocage,
+/// et signalé par un 403 : un 401 ferait croire à l'interface que la session a expiré.
+fn confirm_passphrase(
+    vault: &UnlockedVault,
+    passphrase: &str,
+) -> Result<phonalys_vault::PasswordKey, ApiError> {
+    vault
+        .password_key(passphrase.as_bytes())
+        .map_err(|e| match e {
+            VaultError::WrongPassword => ApiError::ReauthFailed(vault.remaining_attempts().ok()),
+            e => e.into(),
+        })
+}
+
+#[derive(Deserialize)]
+pub struct PassphraseChange {
+    current: Zeroizing<String>,
+    new: Zeroizing<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PassphraseChanged {
+    /// Nouvelle sauvegarde, ouvrable avec la nouvelle phrase de passe.
+    backup: Option<String>,
+}
+
+/// Change la phrase de passe (fuite, soupçon, renouvellement). Les appareils liés et les
+/// codes de récupération restent valables. Toutes les sessions sont ensuite fermées :
+/// la reconnexion prouve que la nouvelle phrase de passe fonctionne. Une sauvegarde est
+/// faite aussitôt, car les anciennes s'ouvrent avec l'**ancienne** phrase de passe.
+pub async fn change_passphrase(
+    State(state): State<AppState>,
+    Json(req): Json<PassphraseChange>,
+) -> Result<Json<PassphraseChanged>, ApiError> {
+    let s = state.clone();
+    let changed = blocking(move || {
+        s.with_vault(|vault| {
+            let pk = confirm_passphrase(vault, &req.current)?;
+            if req.new.as_str() == req.current.as_str() {
+                return Err(ApiError::BadRequest(
+                    "la nouvelle phrase de passe doit être différente".into(),
+                ));
+            }
+            phonalys_auth::check_passphrase(&req.new, &[])
+                .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+            vault.change_password(&pk, req.new.as_bytes(), s.config.kdf)?;
+            tracing::info!("phrase de passe changée");
+            let backup = match crate::backup::run_backup(vault, &s.config.backup_dir, now()) {
+                Ok(entry) => Some(entry.name),
+                Err(e) => {
+                    tracing::error!(error = ?e, "sauvegarde après changement de phrase de passe");
+                    None
+                }
+            };
+            Ok(PassphraseChanged { backup })
+        })
+    })
+    .await?;
+    state.lock_all(AuditAction::Lock);
+    Ok(Json(changed))
+}
+
+#[derive(Deserialize)]
+pub struct PassphraseConfirm {
+    passphrase: Zeroizing<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NewRecoveryCodes {
+    recovery_codes: Vec<String>,
+}
+
+/// Remplace tous les codes de récupération (codes épuisés, ou feuille perdue ou vue
+/// par un tiers). Les anciens cessent aussitôt de fonctionner.
+pub async fn regenerate_recovery_codes(
+    State(state): State<AppState>,
+    Json(req): Json<PassphraseConfirm>,
+) -> Result<Json<NewRecoveryCodes>, ApiError> {
+    blocking(move || {
+        state.with_vault(|vault| {
+            let pk = confirm_passphrase(vault, &req.passphrase)?;
+            let (_, codes) = RecoveryCodes::generate();
+            vault.replace_recovery_factors(&pk, &recovery_secrets(&codes))?;
+            vault.audit(
+                ACTOR,
+                AuditAction::SecurityPolicyChanged,
+                Some("recovery-codes"),
+            )?;
+            Ok(Json(NewRecoveryCodes {
+                recovery_codes: codes,
+            }))
         })
     })
     .await

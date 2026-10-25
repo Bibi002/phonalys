@@ -28,9 +28,9 @@ Si l'empreinte diffère, **n'installez pas** le fichier.
 ## 3. Premier démarrage
 
 1. Lancez Phonalys. L'écran « Installation de Phonalys » s'ouvre ; dans l'application de bureau, le jeton d'installation est déjà rempli.
-2. Choisissez une **phrase de passe** d'au moins 14 caractères (idéalement 5 mots). **Sans elle, vos données sont définitivement illisibles** : il n'existe aucune réinitialisation.
+2. Choisissez une **phrase de passe** d'au moins 14 caractères (idéalement 5 mots) et **notez-la sur papier**, rangée en lieu sûr. **Sans elle, vos données sont définitivement illisibles** : il n'existe aucune réinitialisation, et les codes de récupération ne la remplacent pas.
 3. Scannez le QR code avec une application d'authentification hors ligne (Aegis, 2FAS, Ente Auth, Bitwarden, KeePassXC).
-4. **Imprimez ou notez les codes de récupération** et rangez-les hors ligne, loin de l'ordinateur.
+4. **Imprimez ou notez les codes de récupération** et rangez-les hors ligne, loin de l'ordinateur. Ils remplacent le code à 6 chiffres ou un appareil perdu, toujours **avec** la phrase de passe.
 5. Connectez-vous, puis dans « Sécurité », activez la connexion biométrique (empreinte, visage, Windows Hello).
 6. Dans « Réglages › Cabinet », renseignez vos coordonnées : elles apparaissent sur les bilans et dans les documents de l'écran « Conformité ».
 
@@ -38,7 +38,7 @@ Vous avez déjà une sauvegarde (nouvel ordinateur) ? À l'écran d'installation
 
 ## 4. Serveur du cabinet (téléphones et tablettes)
 
-Le serveur s'installe sur la machine qui reste allumée au cabinet (PC fixe, mini-PC, serveur domestique).
+Le serveur s'installe sur la machine qui reste allumée au cabinet (PC fixe, mini-PC, serveur domestique). Sur cette machine, utilisez Phonalys **dans le navigateur** (`https://phonalys.lan:8443`) et non l'application de bureau : un même coffre ne peut être ouvert que par un seul programme à la fois, et Phonalys refuse un second lancement.
 
 1. Dans la box ou le routeur, donnez un nom à cette machine, par exemple `phonalys.lan`, et fixez son adresse IP.
 2. Décompressez l'archive dans un dossier, par exemple `C:\Phonalys` ou `/opt/phonalys`.
@@ -82,13 +82,15 @@ N'ouvrez jamais le port 8443 vers Internet. Pour un accès à distance, utilisez
 
 Au démarrage, l'application de bureau vérifie s'il existe une nouvelle version sur la page publique des versions. Si c'est le cas, elle le signale : **rien ne s'installe sans votre accord** (« Installer maintenant » ou « Plus tard »). La mise à jour est vérifiée par signature avant l'installation, puis Phonalys redémarre ; vos données ne sont pas touchées.
 
-Cette vérification n'envoie aucune information sur le cabinet. Pour la désactiver (poste géré par un informaticien), créez un fichier vide nommé `mises-a-jour-desactivees` dans le dossier de données (`%LOCALAPPDATA%Phonalys` ou `~/.local/share/Phonalys`).
+Cette vérification n'envoie aucune information sur le cabinet. Pour la désactiver (poste géré par un informaticien), créez un fichier vide nommé `mises-a-jour-desactivees` dans le dossier de données (`%LOCALAPPDATA%\Phonalys` ou `~/.local/share/Phonalys`).
 
 Les paquets `.deb` et `.rpm` et le serveur du cabinet se mettent à jour en installant la nouvelle version par-dessus l'ancienne. Les versions 0.1.0 et 0.1.1 ne savent pas encore se mettre à jour : installez une fois la version suivante à la main.
 
 ## 5. Sauvegardes
 
-Une sauvegarde chiffrée est créée automatiquement chaque jour d'utilisation et testée aussitôt. Dans « Sauvegardes », indiquez un **second dossier** (clé USB, NAS) pour en garder une copie ailleurs. Une sauvegarde s'ouvre avec la phrase de passe en vigueur au moment où elle a été faite.
+Une sauvegarde chiffrée est créée automatiquement chaque jour d'utilisation et testée aussitôt. Par défaut, elle est sur **le même disque** que le coffre : elle ne protège ni d'une panne du disque, ni d'un vol. Dans « Sauvegardes », indiquez un **second dossier** (clé USB, disque externe, NAS) ; tant que ce n'est pas fait, l'accueil l'affiche en alerte. Une sauvegarde s'ouvre avec la phrase de passe en vigueur au moment où elle a été faite.
+
+Faites au moins une fois l'essai complet : restaurer une sauvegarde sur un autre ordinateur, avant d'en avoir besoin.
 
 ## 6. Assistant de rédaction (facultatif)
 
@@ -101,6 +103,9 @@ L'écran « Conformité » génère le registre des traitements, la notice à re
 ## En cas de problème
 
 - **« Serveur injoignable »** : vérifiez que le serveur tourne et que l'appareil est sur le réseau du cabinet.
-- **Phrase de passe oubliée** : connectez-vous avec un code de récupération.
+- **Code à 6 chiffres ou téléphone perdu** : connectez-vous avec la phrase de passe et un code de récupération, puis générez-en de nouveaux (« Sécurité »).
+- **Phrase de passe oubliée** : aucune récupération n'est possible, ni par les codes, ni par l'éditeur. C'est le prix d'un chiffrement que personne d'autre ne peut ouvrir : d'où la phrase notée sur papier, en lieu sûr.
+- **Phrase de passe peut-être connue d'un tiers** : « Sécurité › Changer la phrase de passe ».
+- **« Phonalys est déjà ouvert »** : une autre fenêtre de Phonalys ou le serveur du cabinet tourne déjà sur cet ordinateur ; fermez-le, ou utilisez le navigateur.
 - **Ordinateur ou téléphone perdu** : suivez « Conformité › Violation de données ».
 - **Faille de sécurité ou comportement suspect** : écrivez à phonalys@proton.me, sans publier les détails avant le correctif.

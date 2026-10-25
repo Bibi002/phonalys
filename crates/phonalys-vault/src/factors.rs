@@ -21,8 +21,8 @@
 //! est refusé : il faut la phrase de passe **et** un second facteur.
 
 use crate::{
-    check_lockout, derive_stored_kek, failures, register_failure, wrapped_master, LockedVault,
-    UnlockedVault, VaultError, MASTER_CONTEXT,
+    check_lockout, derive_stored_kek, failures, register_failure, savepoint, wrapped_master,
+    LockedVault, UnlockedVault, VaultError, MASTER_CONTEXT,
 };
 use phonalys_core::audit::AuditAction;
 use phonalys_crypto::{
@@ -404,18 +404,19 @@ impl UnlockedVault {
         codes: &[Vec<u8>],
     ) -> Result<(), VaultError> {
         self.require_password_key(pk)?;
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM factor_wraps WHERE kind = 'recovery'", [])?;
-        for (i, code) in codes.iter().enumerate() {
-            let id = format!("r{i}");
-            let blob = seal_factor(pk, &self.master, FactorKind::Recovery, &id, code)?;
-            tx.execute(
-                "INSERT INTO factor_wraps (kind, id, blob) VALUES ('recovery', ?1, ?2)",
-                params![id, blob],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+        let tx = &self.conn;
+        savepoint(tx, || {
+            tx.execute("DELETE FROM factor_wraps WHERE kind = 'recovery'", [])?;
+            for (i, code) in codes.iter().enumerate() {
+                let id = format!("r{i}");
+                let blob = seal_factor(pk, &self.master, FactorKind::Recovery, &id, code)?;
+                tx.execute(
+                    "INSERT INTO factor_wraps (kind, id, blob) VALUES ('recovery', ?1, ?2)",
+                    params![id, blob],
+                )?;
+            }
+            Ok(())
+        })
     }
 
     /// Active ou désactive le mode lié au matériel.
@@ -453,33 +454,35 @@ impl UnlockedVault {
             kek: derive_kek(new_password, &salt, params)?,
         };
 
-        let tx = self.conn.unchecked_transaction()?;
-        let bound = is_bound(&tx)?;
-        let wrapped = if bound {
-            Vec::new()
-        } else {
-            wrap_key(&new.kek, &self.master, MASTER_CONTEXT)?
-        };
-        tx.execute(
-            "UPDATE meta SET kdf_salt = ?1, kdf_memory_kib = ?2, kdf_iterations = ?3,
-             kdf_parallelism = ?4, wrapped_master = ?5 WHERE id = 1",
-            params![
-                salt.as_slice(),
-                params.memory_kib,
-                params.iterations,
-                params.parallelism,
-                wrapped,
-            ],
-        )?;
-        for (kind, id, blob) in all_wraps(&tx)? {
-            let inner = open_outer(old, &blob, kind, &id)?;
-            let resealed = seal(&new.kek, &inner, &context(kind, &id))?;
+        let tx = &self.conn;
+        savepoint(tx, || {
+            let bound = is_bound(tx)?;
+            let wrapped = if bound {
+                Vec::new()
+            } else {
+                wrap_key(&new.kek, &self.master, MASTER_CONTEXT)?
+            };
             tx.execute(
-                "UPDATE factor_wraps SET blob = ?1 WHERE kind = ?2 AND id = ?3",
-                params![resealed, kind.as_str(), id],
+                "UPDATE meta SET kdf_salt = ?1, kdf_memory_kib = ?2, kdf_iterations = ?3,
+                 kdf_parallelism = ?4, wrapped_master = ?5 WHERE id = 1",
+                params![
+                    salt.as_slice(),
+                    params.memory_kib,
+                    params.iterations,
+                    params.parallelism,
+                    wrapped,
+                ],
             )?;
-        }
-        tx.commit()?;
+            for (kind, id, blob) in all_wraps(tx)? {
+                let inner = open_outer(old, &blob, kind, &id)?;
+                let resealed = seal(&new.kek, &inner, &context(kind, &id))?;
+                tx.execute(
+                    "UPDATE factor_wraps SET blob = ?1 WHERE kind = ?2 AND id = ?3",
+                    params![resealed, kind.as_str(), id],
+                )?;
+            }
+            Ok(())
+        })?;
         self.audit("praticien", AuditAction::PasswordChanged, None)
     }
 }

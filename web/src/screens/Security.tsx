@@ -17,6 +17,11 @@ export function Security() {
   const [passphrase, setPassphrase] = useState("");
   const [bindingPass, setBindingPass] = useState("");
   const [newCodes, setNewCodes] = useState<string[]>();
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [nextAgain, setNextAgain] = useState("");
+  const [changed, setChanged] = useState<{ backup?: string | null }>();
+  const [codesPass, setCodesPass] = useState("");
   const { busy, error, run } = useAction();
 
   async function refresh() {
@@ -90,7 +95,44 @@ export function Security() {
     });
   }
 
+  function changePassphrase() {
+    void run(async () => {
+      if (next !== nextAgain) throw new Error("Les deux saisies de la nouvelle phrase de passe sont différentes.");
+      const r = await api<{ backup?: string | null }>("POST", "/api/security/passphrase", { current, new: next });
+      setCurrent("");
+      setNext("");
+      setNextAgain("");
+      setChanged(r);
+    });
+  }
+
+  function regenerateCodes() {
+    void run(async () => {
+      const r = await api<{ recovery_codes: string[] }>("POST", "/api/security/recovery-codes", { passphrase: codesPass });
+      setCodesPass("");
+      setNewCodes(r.recovery_codes);
+      setStatus(await api<SecurityStatus>("GET", "/api/security"));
+    });
+  }
+
   if (newCodes) return <RecoveryCodes codes={newCodes} onDone={() => setNewCodes(undefined)} />;
+  if (changed)
+    return (
+      <section className="card warning-card">
+        <h2>Phrase de passe changée</h2>
+        <p>Toutes les sessions ont été fermées, sur tous les appareils. Reconnectez-vous avec la nouvelle phrase de passe.</p>
+        <p>
+          <strong>Les sauvegardes faites avant ce changement s'ouvrent avec l'ancienne phrase de passe.</strong>{" "}
+          {changed.backup
+            ? "Une nouvelle sauvegarde, avec la nouvelle phrase de passe, vient d'être faite."
+            : "La nouvelle sauvegarde a échoué : faites-en une dès la reconnexion (« Sauvegardes »)."}{" "}
+          Gardez l'ancienne phrase de passe en lieu sûr tant que vous gardez ces anciennes sauvegardes.
+        </p>
+        <button type="button" onClick={() => void api("GET", "/api/security").catch(() => undefined)}>
+          Se reconnecter
+        </button>
+      </section>
+    );
   if (!status) return <section className="card"><ErrorBox error={error} /><p className="muted">Chargement…</p></section>;
   const quick = status.quick_passkeys ?? 0;
 
@@ -224,6 +266,30 @@ export function Security() {
             Activer ({status.bound_passkeys} clé{status.bound_passkeys > 1 ? "s" : ""} liée{status.bound_passkeys > 1 ? "s" : ""})
           </button>
         )}
+      </section>
+      <section className="card">
+        <h2>Changer la phrase de passe</h2>
+        <p className="muted">
+          En cas de doute (phrase vue, notée, ou utilisée ailleurs). Vos clés biométriques et vos codes de récupération
+          restent valables. Toutes les sessions seront fermées.
+        </p>
+        <PasswordField label="Phrase de passe actuelle" value={current} onChange={setCurrent} autoComplete="current-password" />
+        <PasswordField label="Nouvelle phrase de passe" value={next} onChange={setNext} autoComplete="new-password" />
+        <PasswordField label="Nouvelle phrase de passe (encore)" value={nextAgain} onChange={setNextAgain} autoComplete="new-password" />
+        <button type="button" disabled={busy || !current || !next || !nextAgain} onClick={changePassphrase}>
+          Changer la phrase de passe
+        </button>
+      </section>
+
+      <section className="card">
+        <h2>Nouveaux codes de récupération</h2>
+        <p className="muted">
+          Codes épuisés, feuille perdue ou vue par quelqu'un : générez-en dix nouveaux. Les anciens cessent aussitôt de
+          fonctionner. Un code de récupération remplace un appareil perdu, <strong>jamais la phrase de passe</strong> :
+          celle-ci reste toujours nécessaire.
+        </p>
+        <PasswordField label="Phrase de passe (confirmation)" value={codesPass} onChange={setCodesPass} autoComplete="current-password" />
+        <ConfirmButton label="Générer de nouveaux codes" confirmLabel="Remplacer tous les codes" disabled={!codesPass} onConfirm={regenerateCodes} />
       </section>
       <PairingSection />
     </>

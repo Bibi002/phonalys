@@ -125,7 +125,7 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<Created>), ApiError> {
     let k = kind(&k)?;
     let data = strip_id(data);
-    state.with_vault(|vault| {
+    state.with_vault_atomic(|vault| {
         validate(vault, &data)?;
         let id = UnlockedVault::new_id();
         vault.put_json(k, &id, &data)?;
@@ -155,7 +155,7 @@ pub async fn update(
     let k = kind(&k)?;
     let id = parse_id(&id)?;
     let data = strip_id(data);
-    state.with_vault(|vault| {
+    state.with_vault_atomic(|vault| {
         // Un identifiant inconnu ne crée pas d'enregistrement.
         let _: Value = vault.get_json(k, &id)?;
         validate(vault, &data)?;
@@ -171,7 +171,7 @@ pub async fn delete(
 ) -> Result<StatusCode, ApiError> {
     let k = kind(&k)?;
     let id = parse_id(&id)?;
-    state.with_vault(|vault| {
+    state.with_vault_atomic(|vault| {
         vault.delete(k, &id)?;
         vault.audit(ACTOR, AuditAction::RecordErased, Some(&target(k, &id)))?;
         Ok(StatusCode::NO_CONTENT)
@@ -310,8 +310,10 @@ pub struct AuditView {
 
 #[derive(Debug, Serialize)]
 pub struct AuditPage {
-    /// La chaîne HMAC a été vérifiée à l'ouverture du coffre.
+    /// La chaîne HMAC et son ancrage étaient intacts à l'ouverture du coffre.
     verified: bool,
+    /// Sinon, ce qui a été constaté.
+    alert: Option<String>,
     total: usize,
     entries: Vec<AuditView>,
 }
@@ -337,7 +339,8 @@ pub async fn audit(State(state): State<AppState>) -> Result<Json<AuditPage>, Api
             })
             .collect();
         Ok(Json(AuditPage {
-            verified: true,
+            verified: vault.audit_alert().is_none(),
+            alert: vault.audit_alert().map(str::to_owned),
             total: all.len(),
             entries,
         }))

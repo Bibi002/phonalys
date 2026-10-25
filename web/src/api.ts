@@ -97,6 +97,8 @@ export interface SecurityStatus {
   bound_passkeys: number;
   quick_passkeys?: number;
   recovery_codes_remaining: number;
+  /** Altération du journal d'audit constatée à l'ouverture du coffre. */
+  audit_alert?: string | null;
 }
 
 export interface BindingResult {
@@ -121,6 +123,7 @@ export interface AuditEntry {
 
 export interface AuditPage {
   verified: boolean;
+  alert?: string | null;
   total: number;
   entries: AuditEntry[];
 }

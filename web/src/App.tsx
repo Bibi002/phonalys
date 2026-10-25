@@ -40,6 +40,12 @@ const PAGES: readonly (readonly [Page, string])[] = [
 const WARNING_SECS = 120;
 /** Au plus un signal d'activité vers le serveur par minute. */
 const KEEPALIVE_SECS = 60;
+/**
+ * Après un verrouillage automatique, l'écran en cours (saisie comprise) reste en mémoire,
+ * masqué, pendant ce délai : on reprend où l'on en était au lieu de perdre un compte rendu.
+ * Au-delà, ou après « Verrouiller », tout est effacé.
+ */
+const RESUME_SECS = 30 * 60;
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -49,6 +55,8 @@ export function App() {
   const [patientId, setPatientId] = useState<string>();
   const [idle, setIdle] = useState(900);
   const [hiddenLock, setHiddenLock] = useState(300);
+  // Écran conservé (masqué) pendant la reconnexion qui suit un verrouillage automatique.
+  const [retained, setRetained] = useState(false);
   const lastActivity = useRef(Date.now());
   const mainRef = useRef<HTMLElement>(null);
   useLang();
@@ -70,15 +78,30 @@ export function App() {
     }
   }, []);
 
+  /** Fin de session. `keep` : verrouillage automatique, la saisie en cours est conservée. */
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const sessionEnded = useCallback((keep: boolean) => {
+    if (phaseRef.current === "open") setRetained(keep);
+    else if (!keep) setRetained(false);
+    setPhase("login");
+  }, []);
+
   useEffect(() => {
     setApiHooks({
       activity: () => {
         lastActivity.current = Date.now();
       },
-      unauthorized: () => setPhase("login"),
+      unauthorized: () => sessionEnded(true),
     });
     void refresh();
-  }, [refresh]);
+  }, [refresh, sessionEnded]);
+
+  useEffect(() => {
+    if (!retained || phase === "open") return;
+    const t = setTimeout(() => setRetained(false), RESUME_SECS * 1000);
+    return () => clearTimeout(t);
+  }, [retained, phase]);
 
   // Taper, cliquer ou faire défiler compte comme une activité : la session est
   // prolongée sur le serveur (au plus une fois par minute), sans quoi le verrouillage
@@ -105,7 +128,7 @@ export function App() {
     const close = () => {
       void api("POST", "/api/logout")
         .catch(() => undefined)
-        .finally(() => setPhase("login"));
+        .finally(() => sessionEnded(true));
     };
     const onVisibility = () => {
       clearTimeout(timer);
@@ -123,7 +146,7 @@ export function App() {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [phase, hiddenLock]);
+  }, [phase, hiddenLock, sessionEnded]);
 
   const navigate: Navigate = useCallback((p, id) => {
     setPage(p);
@@ -146,50 +169,55 @@ export function App() {
       </main>
     );
   if (phase === "setup") return <Setup onDone={() => setPhase("login")} />;
-  if (phase === "login") return <Login onLoggedIn={() => void refresh()} />;
+  const resuming = phase === "login" && retained;
+  if (phase === "login" && !retained) return <Login onLoggedIn={() => void refresh()} />;
 
   return (
-    <div className="shell">
-      <a className="skip" href="#contenu">
-        {t("Aller au contenu")}
-      </a>
-      <header className="topbar">
-        <strong className="brand">Phonalys</strong>
-        <SessionTimer idleSecs={idle} lastActivity={lastActivity} onExpired={() => setPhase("login")} />
-        <LockButton onLocked={() => setPhase("login")} />
-      </header>
-      <nav className="sidebar" aria-label={t("Navigation principale")}>
-        {PAGES.map(([p, label]) => (
-          <button
-            key={p}
-            type="button"
-            className={page === p ? "nav active" : "nav"}
-            aria-current={page === p ? "page" : undefined}
-            onClick={() => navigate(p)}
-          >
-            {t(label)}
-          </button>
-        ))}
-      </nav>
-      <main className="content" id="contenu" ref={mainRef} tabIndex={-1}>
-        {page === "home" && (
-          <>
-            <BiometricInvite onActivate={() => navigate("security")} />
-            <Home navigate={navigate} />
-          </>
-        )}
-        {page === "patients" && <Patients navigate={navigate} openId={patientId} />}
-        {page === "agenda" && <Agenda navigate={navigate} />}
-        {page === "bilans" && <Bilans navigate={navigate} />}
-        {page === "exercices" && <Exercises patientId={patientId} />}
-        {page === "documents" && <Documents />}
-        {page === "settings" && <Settings onIdleChanged={setIdle} onHiddenLockChanged={setHiddenLock} />}
-        {page === "backups" && <Backups />}
-        {page === "security" && <Security />}
-        {page === "audit" && <Audit />}
-        {page === "conformite" && <Conformite />}
-      </main>
-    </div>
+    <>
+      {resuming && <Login resumable onLoggedIn={() => void refresh()} />}
+      {/* Masqué et inerte pendant la reconnexion : rien n'est visible ni atteignable. */}
+      <div className="shell" hidden={resuming} inert={resuming}>
+        <a className="skip" href="#contenu">
+          {t("Aller au contenu")}
+        </a>
+        <header className="topbar">
+          <strong className="brand">Phonalys</strong>
+          {!resuming && <SessionTimer idleSecs={idle} lastActivity={lastActivity} onExpired={() => sessionEnded(true)} />}
+          <LockButton onLocked={() => sessionEnded(false)} />
+        </header>
+        <nav className="sidebar" aria-label={t("Navigation principale")}>
+          {PAGES.map(([p, label]) => (
+            <button
+              key={p}
+              type="button"
+              className={page === p ? "nav active" : "nav"}
+              aria-current={page === p ? "page" : undefined}
+              onClick={() => navigate(p)}
+            >
+              {t(label)}
+            </button>
+          ))}
+        </nav>
+        <main className="content" id="contenu" ref={mainRef} tabIndex={-1}>
+          {page === "home" && (
+            <>
+              <BiometricInvite onActivate={() => navigate("security")} />
+              <Home navigate={navigate} />
+            </>
+          )}
+          {page === "patients" && <Patients navigate={navigate} openId={patientId} />}
+          {page === "agenda" && <Agenda navigate={navigate} />}
+          {page === "bilans" && <Bilans navigate={navigate} />}
+          {page === "exercices" && <Exercises patientId={patientId} />}
+          {page === "documents" && <Documents />}
+          {page === "settings" && <Settings onIdleChanged={setIdle} onHiddenLockChanged={setHiddenLock} />}
+          {page === "backups" && <Backups />}
+          {page === "security" && <Security />}
+          {page === "audit" && <Audit />}
+          {page === "conformite" && <Conformite />}
+        </main>
+      </div>
+    </>
   );
 }
 

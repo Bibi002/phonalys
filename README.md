@@ -10,7 +10,7 @@ Phonalys s'adresse aux logopèdes indépendants. Le praticien fait passer ses é
 
 1. **Les données restent chez le praticien.** Aucun serveur central ni compte hébergé par l'éditeur, et aucune télémétrie.
 2. **IA locale uniquement.** Ollama, llama.cpp, LM Studio, vLLM… sur la machine ou le réseau privé du praticien. Les IA grand public (ChatGPT, Claude, Gemini, Mistral cloud…) sont **bloquées par construction**, voir [`phonalys-ai`](crates/phonalys-ai).
-3. **Chiffrement de bout en bout au repos.** Le chiffrement utilise XChaCha20-Poly1305, les clés sont dérivées par Argon2id et organisées en enveloppes (une clé par dossier patient).
+3. **Chiffrement au repos.** Le chiffrement utilise XChaCha20-Poly1305, les clés sont dérivées par Argon2id et organisées en enveloppes (une clé par dossier patient).
 4. **Double authentification obligatoire, biométrie possible.** Windows Hello, Touch ID, Face ID, l'empreinte Android ou une clé FIDO2 (YubiKey Bio) sont acceptés, et peuvent être rendus obligatoires. Le TOTP et les codes de récupération servent de secours. Aucune donnée biométrique ne quitte l'appareil. En **mode lié au matériel** (extension PRF), la clé du coffre dépend aussi de l'appareil : la phrase de passe volée avec le fichier ne suffit plus à le déchiffrer.
 5. **Le praticien décide.** L'IA propose, le logopède valide. Aucun document ne sort sans relecture humaine.
 

@@ -38,6 +38,7 @@ time.workspace = true
 phonalys-webauthn = { workspace = true, features = ["test-authenticator"] }
 tower.workspace = true
 tempfile.workspace = true
+rusqlite.workspace = true
 
 [lints]
 workspace = true

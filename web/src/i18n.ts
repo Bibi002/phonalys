@@ -117,6 +117,8 @@ const NL: Dict = {
   Enregistrer: "Opslaan",
   "Codes de récupération": "Herstelcodes",
   "Ces codes ne seront plus jamais affichés.": "Deze codes worden nooit meer getoond.",
+  "Phonalys s'est verrouillé. Ce que vous étiez en train de saisir est conservé : reconnectez-vous pour reprendre là où vous en étiez.":
+    "Phonalys is vergrendeld. Wat u aan het invoeren was, blijft bewaard: meld u opnieuw aan om verder te gaan waar u gebleven was.",
   "Chacun permet une seule connexion si vous perdez votre appareil. Imprimez-les ou notez-les et rangez-les hors ligne, à l'écart de votre ordinateur.":
     "Elke code geeft één keer toegang als u uw toestel verliest. Druk ze af of schrijf ze op en bewaar ze offline, uit de buurt van uw computer.",
   "J'ai mis ces codes en lieu sûr.": "Ik heb deze codes veilig opgeborgen.",
@@ -291,6 +293,8 @@ const DE: Dict = {
   Enregistrer: "Speichern",
   "Codes de récupération": "Wiederherstellungscodes",
   "Ces codes ne seront plus jamais affichés.": "Diese Codes werden nie wieder angezeigt.",
+  "Phonalys s'est verrouillé. Ce que vous étiez en train de saisir est conservé : reconnectez-vous pour reprendre là où vous en étiez.":
+    "Phonalys wurde gesperrt. Ihre laufende Eingabe bleibt erhalten: Melden Sie sich erneut an, um dort weiterzumachen, wo Sie aufgehört haben.",
   "Chacun permet une seule connexion si vous perdez votre appareil. Imprimez-les ou notez-les et rangez-les hors ligne, à l'écart de votre ordinateur.":
     "Jeder Code erlaubt eine einzige Anmeldung, falls Sie Ihr Gerät verlieren. Drucken oder notieren Sie sie und bewahren Sie sie offline auf, getrennt von Ihrem Computer.",
   "J'ai mis ces codes en lieu sûr.": "Ich habe diese Codes sicher aufbewahrt.",

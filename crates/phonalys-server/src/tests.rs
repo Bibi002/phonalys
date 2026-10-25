@@ -2387,3 +2387,270 @@ async fn pairing_serves_the_local_authority_without_login() {
     let (s, _, _) = get_full(&plain, "/api/pairing/ca.crt", "").await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+// --- Phrase de passe et codes de récupération ---------------------------------------------
+
+#[tokio::test]
+async fn passphrase_can_be_changed_and_the_old_one_stops_working() {
+    let h = Harness::new();
+    let (totp, codes) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let new = "colibri parapluie tonnerre violette";
+
+    // Phrase de passe actuelle fausse : refusée, comptée, et la session reste ouverte.
+    let (s, _, body) = h
+        .call(
+            "POST",
+            "/api/security/passphrase",
+            Some(json!({ "current": "pas la bonne phrase du tout", "new": new })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["remaining_attempts"], 3);
+    let (s, _, _) = h.call("GET", "/api/patients", None, Some(&cookie)).await;
+    assert_eq!(s, StatusCode::OK);
+
+    // Nouvelle phrase de passe trop faible : refusée.
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/security/passphrase",
+            Some(json!({ "current": PASSPHRASE, "new": "motdepasse123" })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    let (s, _, body) = h
+        .call(
+            "POST",
+            "/api/security/passphrase",
+            Some(json!({ "current": PASSPHRASE, "new": new })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert!(body["backup"].as_str().is_some(), "sauvegarde immédiate");
+    // Toutes les sessions sont fermées.
+    let (s, _, _) = h.call("GET", "/api/patients", None, Some(&cookie)).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+
+    let at = state::now() + 30;
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "code": totp.code_at(at) })),
+            None,
+        )
+        .await;
+    assert_eq!(
+        s,
+        StatusCode::UNAUTHORIZED,
+        "l'ancienne phrase de passe ne marche plus"
+    );
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": new, "code": totp.code_at(at) })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    // Les codes de récupération restent valables avec la nouvelle phrase de passe.
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": new, "recovery_code": codes[0] })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn recovery_codes_can_be_regenerated_and_old_ones_are_revoked() {
+    let h = Harness::new();
+    let (totp, old) = h.setup().await;
+    let cookie = h.login(&totp).await;
+
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/security/recovery-codes",
+            Some(json!({ "passphrase": "pas la bonne phrase du tout" })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    let (s, _, body) = h
+        .call(
+            "POST",
+            "/api/security/recovery-codes",
+            Some(json!({ "passphrase": PASSPHRASE })),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let new: Vec<String> = body["recovery_codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(new.len(), 10);
+    let (_, _, sec) = h.call("GET", "/api/security", None, Some(&cookie)).await;
+    assert_eq!(sec["recovery_codes_remaining"], 10);
+
+    h.call("POST", "/api/lock", None, Some(&cookie)).await;
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "recovery_code": old[0] })),
+            None,
+        )
+        .await;
+    assert_ne!(s, StatusCode::NO_CONTENT, "ancien code révoqué");
+    let (s, _, _) = h
+        .call(
+            "POST",
+            "/api/login",
+            Some(json!({ "passphrase": PASSPHRASE, "recovery_code": new[0] })),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+}
+
+/// Un effacement de dossier qui échoue au milieu ne laisse rien à moitié effacé.
+#[tokio::test]
+async fn failed_patient_erasure_leaves_the_record_intact() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let (_, _, p) = h
+        .call(
+            "POST",
+            "/api/patients",
+            Some(json!({ "nom": "Test" })),
+            Some(&cookie),
+        )
+        .await;
+    let pid = p["id"].as_str().unwrap().to_owned();
+    for _ in 0..2 {
+        let (s, _, _) = h
+            .call(
+                "POST",
+                "/api/records/seance",
+                Some(json!({ "patient_id": pid, "date": "2026-10-25" })),
+                Some(&cookie),
+            )
+            .await;
+        assert_eq!(s, StatusCode::CREATED);
+    }
+    // Disque plein simulé : la suppression du dossier lui-même échoue.
+    let vault_path = h.state.config.vault_path.clone();
+    let conn = rusqlite::Connection::open(&vault_path).unwrap();
+    conn.execute_batch(
+        "CREATE TRIGGER plein BEFORE DELETE ON records WHEN old.kind = 'patient'
+         BEGIN SELECT RAISE(ABORT, 'disque plein'); END;",
+    )
+    .unwrap();
+    let (s, _, _) = h
+        .call(
+            "DELETE",
+            &format!("/api/patients/{pid}"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR);
+    conn.execute_batch("DROP TRIGGER plein").unwrap();
+
+    let (s, _, _) = h
+        .call("GET", &format!("/api/patients/{pid}"), None, Some(&cookie))
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, _, seances) = h
+        .call(
+            "GET",
+            &format!("/api/records/seance?patient_id={pid}"),
+            None,
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(seances.as_array().unwrap().len(), 2, "aucune séance perdue");
+    let (_, _, audit) = h.call("GET", "/api/audit", None, Some(&cookie)).await;
+    assert_eq!(audit["verified"], true);
+}
+
+/// Horloge partie dans le futur puis corrigée : la rotation suit l'ordre réel des
+/// sauvegardes, la plus récente n'est jamais supprimée, et la sauvegarde automatique
+/// reprend au lieu d'attendre la date future.
+#[tokio::test]
+async fn backups_survive_a_wrong_clock() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let dir = h.state.config.backup_dir.clone();
+    let future = 2_100_000_000; // 2036
+    for i in 0..backup::KEEP as u64 {
+        h.state
+            .with_vault(|v| backup::run_backup(v, &dir, future + i * 86_400))
+            .unwrap();
+    }
+    let now = state::now();
+    let latest = h
+        .state
+        .with_vault(|v| backup::run_backup(v, &dir, now))
+        .unwrap();
+    assert!(
+        dir.join(&latest.name).is_file(),
+        "la plus récente est gardée"
+    );
+    let files = std::fs::read_dir(&dir).unwrap().count();
+    assert_eq!(files, backup::KEEP);
+
+    // Plus de 24 h plus tard (horloge juste) : la sauvegarde automatique a lieu.
+    backup::auto_backup(&h.state, now + backup::AUTO_INTERVAL_SECS + 1);
+    let (_, _, status) = h.call("GET", "/api/backups", None, Some(&cookie)).await;
+    assert_eq!(
+        status["last"]["created_at"],
+        now + backup::AUTO_INTERVAL_SECS + 1
+    );
+}
+
+#[tokio::test]
+async fn backup_risks_are_reported() {
+    let h = Harness::new();
+    let (totp, _) = h.setup().await;
+    let cookie = h.login(&totp).await;
+    let (_, _, status) = h.call("GET", "/api/backups", None, Some(&cookie)).await;
+    let warnings = status["warnings"].to_string();
+    assert!(warnings.contains("Aucune sauvegarde"), "{warnings}");
+    assert!(warnings.contains("même disque"), "{warnings}");
+
+    // Dossier de sauvegarde inutilisable : l'échec est enregistré et affiché.
+    let blocked = h._dir.path().join("pas-un-dossier");
+    std::fs::write(&blocked, b"fichier").unwrap();
+    assert!(h
+        .state
+        .with_vault(|v| backup::run_backup(v, &blocked, state::now()))
+        .is_err());
+    let (_, _, status) = h.call("GET", "/api/backups", None, Some(&cookie)).await;
+    assert!(status["failure"]["message"].is_string(), "{status}");
+    assert!(status["warnings"].to_string().contains("a échoué"));
+
+    let (s, _, _) = h.call("POST", "/api/backups", None, Some(&cookie)).await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, _, status) = h.call("GET", "/api/backups", None, Some(&cookie)).await;
+    assert!(
+        status["failure"].is_null(),
+        "l'alerte disparaît après une réussite"
+    );
+}

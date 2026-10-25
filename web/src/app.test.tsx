@@ -26,6 +26,7 @@ function fakeServer() {
       if (url.startsWith("/api/documents"))
         return json([{ id: "d1", patient_id: PATIENT.id, name: "Prescription.pdf", mime: "application/pdf", size: 2048, category: "Prescription", created_at: 1761400000 }]);
       if (url === "/api/reauth") return json({ elevated_secs: 300 });
+      if (url === "/api/lock" || url === "/api/logout") return new Response(null, { status: 204 });
       if (url === "/api/ai/settings") return json({ enabled: false, kind: "ollama", endpoint: "http://127.0.0.1:11434", model: "", allow_plaintext_lan: false, style: "", timeout_secs: 300 });
       if (url === "/api/settings") return json({ idle_timeout_minutes: 15, practitioner: {}, auto_backup: true });
       if (url === "/api/backups") return json({ dir: "C:\\data", extra_dir: null, auto: true, last: null, files: [] });
@@ -107,6 +108,40 @@ describe("arrière-plan", () => {
     expect(logouts()).toBe(1);
     clock.mockRestore();
     await waitFor(() => expect(screen.queryByRole("navigation")).toBeNull());
+  });
+
+  it("une saisie en cours survit au verrouillage automatique, pas au verrouillage manuel", async () => {
+    fakeServer();
+    render(<App />);
+    fireEvent.click(within(await screen.findByRole("navigation")).getByRole("button", { name: "Réglages" }));
+    const field = (await screen.findAllByRole("textbox"))[0] as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "Compte rendu en cours" } });
+
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now");
+    clock.mockReturnValue(start);
+    setVisibility("hidden");
+    clock.mockReturnValue(start + 200_000);
+    setVisibility("visible");
+    clock.mockRestore();
+
+    await screen.findByText(/Ce que vous étiez en train de saisir est conservé/);
+    expect(screen.queryByRole("navigation")).toBeNull();
+    // Masquée et inerte, mais toujours en mémoire.
+    expect(field.isConnected).toBe(true);
+    expect(field.value).toBe("Compte rendu en cours");
+    expect(field.closest(".shell")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("« Verrouiller » efface l'écran en cours", async () => {
+    fakeServer();
+    render(<App />);
+    fireEvent.click(within(await screen.findByRole("navigation")).getByRole("button", { name: "Réglages" }));
+    const field = (await screen.findAllByRole("textbox"))[0] as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "Compte rendu en cours" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verrouiller" }));
+    await waitFor(() => expect(field.isConnected).toBe(false));
+    expect(screen.queryByText(/est conservé/)).toBeNull();
   });
 });
 

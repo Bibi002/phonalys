@@ -27,6 +27,18 @@ fn reopen(path: &Path, password: &[u8]) -> Result<UnlockedVault, VaultError> {
 }
 
 #[test]
+fn a_vault_is_used_by_one_instance_at_a_time() {
+    let (_dir, path, _vault) = new_vault();
+    let first = phonalys_vault::InstanceLock::acquire(&path).unwrap();
+    assert!(matches!(
+        phonalys_vault::InstanceLock::acquire(&path),
+        Err(VaultError::InUse)
+    ));
+    drop(first);
+    assert!(phonalys_vault::InstanceLock::acquire(&path).is_ok());
+}
+
+#[test]
 fn records_roundtrip_across_lock_and_reopen() {
     let (_dir, path, vault) = new_vault();
     let id = UnlockedVault::new_id();
@@ -147,22 +159,103 @@ fn swapped_ciphertexts_are_detected() {
     ));
 }
 
+/// Un journal altéré ne doit jamais rendre les dossiers inaccessibles : le coffre
+/// s'ouvre, l'altération est signalée, et le journal continue sans réutiliser de numéro.
 #[test]
-fn tampered_audit_blocks_unlock() {
+fn tampered_audit_opens_with_an_alert() {
     let (_dir, path, mut vault) = new_vault();
+    vault.put("patient", "a", b"dossier").unwrap();
     vault
         .audit("lp", AuditAction::PatientViewed, Some("p1"))
         .unwrap();
+    assert!(vault.audit_alert().is_none());
     drop(vault);
 
     let conn = Connection::open(&path).unwrap();
     conn.execute("DELETE FROM audit WHERE seq = 0", []).unwrap();
     drop(conn);
 
+    let mut vault = reopen(&path, PASSWORD).unwrap();
+    assert!(vault.audit_alert().is_some());
+    assert_eq!(vault.get("patient", "a").unwrap().as_slice(), b"dossier");
+    vault.audit("lp", AuditAction::Lock, None).unwrap();
+    drop(vault);
+    assert!(reopen(&path, PASSWORD).unwrap().audit_alert().is_some());
+}
+
+#[test]
+fn deleting_the_last_audit_entries_is_detected() {
+    let (_dir, path, mut vault) = new_vault();
+    for _ in 0..3 {
+        vault
+            .audit("lp", AuditAction::PatientViewed, Some("p1"))
+            .unwrap();
+    }
+    drop(vault);
+    assert!(reopen(&path, PASSWORD).unwrap().audit_alert().is_none());
+
+    let conn = Connection::open(&path).unwrap();
+    conn.execute(
+        "DELETE FROM audit WHERE seq = (SELECT MAX(seq) FROM audit)",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let alert = reopen(&path, PASSWORD)
+        .unwrap()
+        .audit_alert()
+        .map(str::to_owned);
+    assert!(alert.unwrap().contains("dernières entrées"));
+}
+
+/// Disque plein pendant l'écriture d'une entrée : l'opération échoue, mais le coffre
+/// reste cohérent (avant ce correctif, il refusait ensuite de s'ouvrir).
+#[test]
+fn failed_audit_write_leaves_a_consistent_vault() {
+    let (_dir, path, mut vault) = new_vault();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "CREATE TRIGGER plein BEFORE INSERT ON audit BEGIN SELECT RAISE(ABORT, 'disque plein'); END;",
+    )
+    .unwrap();
+    assert!(vault.audit("lp", AuditAction::PatientViewed, None).is_err());
+    conn.execute_batch("DROP TRIGGER plein").unwrap();
+    vault.audit("lp", AuditAction::Lock, None).unwrap();
+    drop(vault);
+    drop(conn);
+
+    let vault = reopen(&path, PASSWORD).unwrap();
+    assert!(vault.audit_alert().is_none());
+    let actions: Vec<_> = vault.audit_entries().iter().map(|e| e.action).collect();
+    assert_eq!(actions, [AuditAction::VaultCreated, AuditAction::Lock]);
+}
+
+#[test]
+fn atomic_writes_all_or_nothing() {
+    let (_dir, path, mut vault) = new_vault();
+    let failed: Result<(), VaultError> = vault.atomic(|v| {
+        v.put("patient", "a", b"dossier")?;
+        v.audit("lp", AuditAction::PatientCreated, Some("a"))?;
+        Err(VaultError::Precondition("erreur au milieu"))
+    });
+    assert!(failed.is_err());
     assert!(matches!(
-        reopen(&path, PASSWORD),
-        Err(VaultError::Integrity(_))
+        vault.get("patient", "a"),
+        Err(VaultError::RecordNotFound)
     ));
+    assert_eq!(vault.audit_entries().len(), 1);
+
+    vault
+        .atomic(|v| {
+            v.put("patient", "b", b"dossier")?;
+            v.audit("lp", AuditAction::PatientCreated, Some("b"))
+        })
+        .unwrap();
+    drop(vault);
+    let vault = reopen(&path, PASSWORD).unwrap();
+    assert!(vault.audit_alert().is_none());
+    assert_eq!(vault.audit_entries().len(), 2);
+    assert_eq!(vault.get("patient", "b").unwrap().as_slice(), b"dossier");
 }
 
 #[test]

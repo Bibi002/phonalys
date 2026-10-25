@@ -43,7 +43,7 @@ const METHODS = [
 const describe = (e: unknown) => (e instanceof DOMException ? describeWebAuthnError(e) : describeError(e));
 const isStepUp = (e: unknown) => e instanceof ApiError && /deux vérifications/.test(e.message);
 
-export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
+export function Login({ onLoggedIn, resumable = false }: { onLoggedIn: () => void; resumable?: boolean }) {
   const [status, setStatus] = useState<Status>();
   // `quick` : un seul geste ; `full` : phrase de passe + second facteur.
   const [mode, setMode] = useState<"quick" | "full">("full");
@@ -60,6 +60,11 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
 
   return (
     <main className="narrow">
+      {resumable && (
+        <p className="notice" role="status">
+          {t("Phonalys s'est verrouillé. Ce que vous étiez en train de saisir est conservé : reconnectez-vous pour reprendre là où vous en étiez.")}
+        </p>
+      )}
       {mode === "quick" ? (
         <QuickLogin
           onLoggedIn={onLoggedIn}

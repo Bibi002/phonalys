@@ -1,6 +1,7 @@
 use phonalys_auth::SessionConfig;
 use phonalys_crypto::KdfParams;
 use phonalys_server::{app, restore_file, spawn_auto_lock, tls, AppState, Config};
+use phonalys_vault::InstanceLock;
 use phonalys_webauthn::RelyingParty;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -88,6 +89,8 @@ async fn main() -> Result<(), tls::BoxError> {
         std::env::var_os("PHONALYS_DATA_DIR").map_or_else(default_data_dir, PathBuf::from);
     create_private_dir(&data_dir)?;
     let vault_path = data_dir.join("cabinet.phonalys-vault");
+    // Tenu jusqu'à l'arrêt : aucune autre instance ne peut ouvrir ce coffre.
+    let _instance = InstanceLock::acquire(&vault_path)?;
 
     // `phonalys-server restore <fichier>` : restaure une sauvegarde puis s'arrête.
     let args: Vec<String> = std::env::args().skip(1).collect();

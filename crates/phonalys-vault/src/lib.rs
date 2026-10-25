@@ -34,6 +34,9 @@ use zeroize::Zeroizing;
 const FORMAT_VERSION: i64 = 2;
 const MASTER_CONTEXT: &[u8] = b"phonalys:v1:master";
 const AUDIT_KEY_SECRET: &str = "audit-key";
+/// Ancrage du journal : numéro et HMAC de la dernière entrée, scellés avec elle. Une
+/// suppression des dernières entrées (que la chaîne seule ne voit pas) est ainsi détectée.
+const AUDIT_HEAD_SECRET: &str = "audit-head";
 /// Nombre d'échecs tolérés avant d'imposer un délai.
 pub const MAX_ATTEMPTS: u32 = 4;
 /// Durée du blocage après `MAX_ATTEMPTS` échecs consécutifs, en secondes. Un code de
@@ -46,6 +49,10 @@ pub enum VaultError {
     AlreadyExists,
     #[error("aucun coffre à cet emplacement")]
     NotFound,
+    #[error(
+        "Phonalys est déjà ouvert sur cet ordinateur (application ou serveur du cabinet) :          un même coffre ne peut être utilisé que par une seule instance à la fois"
+    )]
+    InUse,
     #[error("mot de passe incorrect")]
     WrongPassword,
     #[error("trop de tentatives : réessayez dans {0} s")]
@@ -154,6 +161,24 @@ fn migrate(conn: &Connection) -> Result<(), VaultError> {
     }
 }
 
+/// Exécute `f` dans un point de sauvegarde SQLite : tout ou rien. Les points de
+/// sauvegarde s'emboîtent, contrairement aux transactions.
+pub(crate) fn savepoint<T>(
+    conn: &Connection,
+    f: impl FnOnce() -> Result<T, VaultError>,
+) -> Result<T, VaultError> {
+    conn.execute_batch("SAVEPOINT phonalys")?;
+    let result = f().and_then(|v| {
+        conn.execute_batch("RELEASE phonalys")?;
+        Ok(v)
+    });
+    if result.is_err() {
+        // Disque plein, erreur d'écriture… : rien de partiel ne reste.
+        let _ = conn.execute_batch("ROLLBACK TO phonalys; RELEASE phonalys");
+    }
+    result
+}
+
 /// Restreint les droits du fichier au seul propriétaire (Unix).
 /// Sous Windows, le fichier hérite des ACL du profil utilisateur.
 fn restrict_permissions(path: &Path) -> std::io::Result<()> {
@@ -165,6 +190,35 @@ fn restrict_permissions(path: &Path) -> std::io::Result<()> {
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
+}
+
+/// Garantit qu'un seul processus utilise un coffre : deux instances (double lancement,
+/// application de bureau et serveur du cabinet sur le même ordinateur) écriraient
+/// chacune leur propre suite du journal d'audit. Le verrou du système est libéré à la
+/// destruction de la valeur, et aussi si le processus s'arrête brutalement.
+#[derive(Debug)]
+pub struct InstanceLock {
+    _file: std::fs::File,
+}
+
+impl InstanceLock {
+    /// Prend le verrou du coffre `vault_path` (fichier voisin `.phonalys-lock`).
+    pub fn acquire(vault_path: &Path) -> Result<Self, VaultError> {
+        let path = vault_path.with_extension("phonalys-lock");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|e| VaultError::Integrity(format!("verrou du coffre : {e}")))?;
+        match file.try_lock() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(std::fs::TryLockError::WouldBlock) => Err(VaultError::InUse),
+            Err(std::fs::TryLockError::Error(e)) => {
+                Err(VaultError::Integrity(format!("verrou du coffre : {e}")))
+            }
+        }
+    }
 }
 
 /// Coffre verrouillé : seul le déverrouillage est possible.
@@ -179,6 +233,8 @@ pub struct UnlockedVault {
     conn: Connection,
     master: SecretKey,
     audit: AuditLog,
+    /// Altération du journal constatée à l'ouverture.
+    audit_alert: Option<String>,
 }
 
 impl LockedVault {
@@ -219,6 +275,7 @@ impl LockedVault {
             conn,
             master,
             audit: AuditLog::new(audit_key),
+            audit_alert: None,
         };
         vault.audit("praticien", AuditAction::VaultCreated, None)?;
         Ok(vault)
@@ -255,10 +312,11 @@ impl LockedVault {
     #[allow(clippy::result_large_err)]
     fn finish_unlock(self, master: SecretKey) -> Result<UnlockedVault, (Self, VaultError)> {
         match Self::load_audit(&self.conn, &master) {
-            Ok(audit) => Ok(UnlockedVault {
+            Ok((audit, audit_alert)) => Ok(UnlockedVault {
                 conn: self.conn,
                 master,
                 audit,
+                audit_alert,
             }),
             Err(e) => Err((self, e)),
         }
@@ -485,19 +543,60 @@ impl UnlockedVault {
         get_secret(&self.conn, &self.master, name)
     }
 
-    /// Inscrit et persiste une entrée d'audit.
+    /// Inscrit et persiste une entrée d'audit. Si l'écriture échoue (disque plein…),
+    /// l'entrée est aussi retirée de la mémoire : le journal en mémoire et celui du
+    /// disque ne divergent jamais, sans quoi la chaîne paraîtrait rompue.
     pub fn audit(
         &mut self,
         actor: &str,
         action: AuditAction,
         target: Option<&str>,
     ) -> Result<(), VaultError> {
+        let cp = self.audit.checkpoint();
         let entry = self.audit.append(actor, action, target).clone();
-        self.conn.execute(
-            "INSERT INTO audit (seq, entry) VALUES (?1, ?2)",
-            params![entry.seq as i64, serde_json::to_string(&entry)?],
-        )?;
-        Ok(())
+        let (conn, master) = (&self.conn, &self.master);
+        let written = savepoint(conn, || {
+            conn.execute(
+                "INSERT INTO audit (seq, entry) VALUES (?1, ?2)",
+                params![entry.seq as i64, serde_json::to_string(&entry)?],
+            )?;
+            let head = format!("{}:{}", entry.seq, entry.mac);
+            put_secret(conn, master, AUDIT_HEAD_SECRET, head.as_bytes())
+        });
+        if written.is_err() {
+            self.audit.rollback(cp);
+        }
+        written
+    }
+
+    /// Exécute `f` en tout ou rien : modifications des enregistrements **et** entrées
+    /// d'audit. En cas d'erreur, rien n'est écrit et le journal en mémoire est rétabli.
+    pub fn atomic<T, E: From<VaultError>>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let cp = self.audit.checkpoint();
+        self.conn
+            .execute_batch("SAVEPOINT phonalys_atomic")
+            .map_err(VaultError::from)?;
+        let result = f(self).and_then(|v| {
+            self.conn
+                .execute_batch("RELEASE phonalys_atomic")
+                .map_err(VaultError::from)?;
+            Ok(v)
+        });
+        if result.is_err() {
+            let _ = self
+                .conn
+                .execute_batch("ROLLBACK TO phonalys_atomic; RELEASE phonalys_atomic");
+            self.audit.rollback(cp);
+        }
+        result
+    }
+
+    /// Altération du journal d'audit constatée à l'ouverture, le cas échéant.
+    pub fn audit_alert(&self) -> Option<&str> {
+        self.audit_alert.as_deref()
     }
 
     pub fn audit_entries(&self) -> &[AuditEntry] {
@@ -510,8 +609,11 @@ impl UnlockedVault {
 pub struct BackupReport {
     /// Enregistrements déchiffrés avec succès.
     pub records: usize,
-    /// Entrées du journal d'audit, chaîne vérifiée.
+    /// Entrées du journal d'audit.
     pub audit_entries: usize,
+    /// Chaîne du journal intacte. Une sauvegarde au journal altéré reste une
+    /// sauvegarde des dossiers : elle est gardée, et l'altération signalée.
+    pub audit_intact: bool,
 }
 
 impl UnlockedVault {
@@ -521,6 +623,11 @@ impl UnlockedVault {
     pub fn snapshot(&self, dest: &Path) -> Result<(), VaultError> {
         if dest.exists() {
             return Err(VaultError::AlreadyExists);
+        }
+        if !self.conn.is_autocommit() {
+            return Err(VaultError::Precondition(
+                "sauvegarde impossible pendant une transaction",
+            ));
         }
         let dest_str = dest
             .to_str()
@@ -554,10 +661,11 @@ impl UnlockedVault {
             let dek = unwrap_key(&self.master, wrapped, &dek_context(kind, id))?;
             drop(Zeroizing::new(open(&dek, sealed, &record_aad(kind, id))?));
         }
-        let audit = LockedVault::load_audit(&conn, &self.master)?;
+        let (audit, alert) = LockedVault::load_audit(&conn, &self.master)?;
         Ok(BackupReport {
             records: rows.len(),
             audit_entries: audit.entries().len(),
+            audit_intact: alert.is_none(),
         })
     }
 }
@@ -591,21 +699,45 @@ impl LockedVault {
         Ok(())
     }
 
-    /// Recharge le journal d'audit et vérifie sa chaîne : un journal altéré bloque l'ouverture.
-    fn load_audit(conn: &Connection, master: &SecretKey) -> Result<AuditLog, VaultError> {
+    /// Recharge le journal d'audit et vérifie sa chaîne et son ancrage. Un journal altéré
+    /// n'empêche pas l'ouverture : l'altération est renvoyée comme alerte.
+    fn load_audit(
+        conn: &Connection,
+        master: &SecretKey,
+    ) -> Result<(AuditLog, Option<String>), VaultError> {
         let audit_key = get_secret(conn, master, AUDIT_KEY_SECRET)?
             .ok_or_else(|| VaultError::Integrity("clé d'audit absente".into()))?;
         let key_bytes: [u8; 32] = audit_key
             .as_slice()
             .try_into()
             .map_err(|_| VaultError::Integrity("clé d'audit invalide".into()))?;
-        let mut stmt = conn.prepare("SELECT entry FROM audit ORDER BY seq")?;
-        let entries = stmt
-            .query_map([], |r| r.get::<_, String>(0))?
-            .map(|row| Ok(serde_json::from_str::<AuditEntry>(&row?)?))
-            .collect::<Result<Vec<_>, VaultError>>()?;
-        AuditLog::from_entries(SecretKey::from_bytes(key_bytes), entries)
-            .map_err(|e| VaultError::Integrity(e.to_string()))
+        let mut stmt = conn.prepare("SELECT seq, entry FROM audit ORDER BY seq")?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut alerts = Vec::new();
+        let mut entries = Vec::with_capacity(rows.len());
+        let mut max_seq = None;
+        for (seq, text) in &rows {
+            max_seq = max_seq.max(Some(*seq));
+            match serde_json::from_str::<AuditEntry>(text) {
+                Ok(e) if e.seq as i64 == *seq => entries.push(e),
+                _ => alerts.push(format!("entrée {seq} illisible")),
+            }
+        }
+        let next_seq = max_seq.map_or(0, |s| s.saturating_add(1) as u64);
+        let (log, broken) = AuditLog::recover(SecretKey::from_bytes(key_bytes), entries, next_seq);
+        if let Some(e) = broken {
+            alerts.push(e.to_string());
+        }
+        if let Some(head) = get_secret(conn, master, AUDIT_HEAD_SECRET)? {
+            let last = log.entries().last().map(|e| format!("{}:{}", e.seq, e.mac));
+            if last.as_deref().map(str::as_bytes) != Some(head.as_slice()) {
+                alerts.push("dernières entrées supprimées ou remplacées".into());
+            }
+        }
+        let alert = (!alerts.is_empty()).then(|| alerts.join(" ; "));
+        Ok((log, alert))
     }
 }
 

@@ -9,6 +9,7 @@ export function Home({ navigate }: { navigate: Navigate }) {
   const patients = usePatients();
   const seances = useRecords<Seance>("seance");
   const security = useLoad(() => api<SecurityStatus>("GET", "/api/security"));
+  const backups = useLoad(() => api<{ warnings?: string[] }>("GET", "/api/backups"));
   const now = today();
 
   const todays = useMemo(
@@ -33,8 +34,31 @@ export function Home({ navigate }: { navigate: Navigate }) {
   const actifs = (patients.data ?? []).filter((p) => (p.statut ?? "actif") === "actif").length;
   const s = security.data;
 
+  const backupWarnings = backups.data?.warnings ?? [];
+
   return (
     <>
+      {s?.audit_alert && (
+        <section className="card warning-card" role="alert">
+          <h2>Journal d'audit altéré</h2>
+          <p>
+            {s.audit_alert}. Le fichier du coffre a peut-être été modifié en dehors de Phonalys. Vos dossiers restent
+            accessibles ; traitez-le comme un incident de sécurité.
+          </p>
+          <button type="button" className="ghost" onClick={() => navigate("audit")}>Voir le journal</button>
+        </section>
+      )}
+      {backupWarnings.length > 0 && (
+        <section className="card warning-card">
+          <h2>Sauvegardes : vos données sont en danger</h2>
+          <ul className="status">
+            {backupWarnings.map((w) => (
+              <li key={w} className="todo">{w}</li>
+            ))}
+          </ul>
+          <button type="button" className="ghost" onClick={() => navigate("backups")}>Ouvrir les sauvegardes</button>
+        </section>
+      )}
       <section className="card">
         <h1>Bonjour</h1>
         <p className="muted">{formatDate(now)} · {actifs} patient(s) en suivi</p>

@@ -71,6 +71,13 @@ export function Audit() {
       <ErrorBox error={page.error} />
       {p && (
         <>
+          {!p.verified && (
+            <p className="error" role="alert">
+              <strong>Journal altéré</strong> : {p.alert ?? "intégrité non vérifiée"}. Quelqu'un a peut-être modifié le
+              fichier du coffre en dehors de Phonalys. Vos dossiers restent accessibles. Traitez-le comme un incident de
+              sécurité (« Conformité › Violation de données ») et contactez phonalys@proton.me.
+            </p>
+          )}
           <p className={p.verified ? "notice" : "error"}>
             {p.verified ? "Intégrité du journal vérifiée" : "Intégrité non vérifiée"} · {p.total} entrée(s)
             {p.total > p.entries.length && ` (les ${p.entries.length} plus récentes sont affichées)`}

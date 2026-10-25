@@ -93,6 +93,8 @@ pub(crate) fn new_challenge() -> Challenge {
 }
 
 #[derive(Debug)]
+// Une seule valeur par serveur : la taille de la variante ne coûte rien.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Phase {
     Locked,
     Unlocked(UnlockedVault),
@@ -148,7 +150,9 @@ impl AppState {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Exécute `f` sur le coffre déverrouillé.
+    /// Exécute `f` sur le coffre déverrouillé. Chaque écriture est conservée même si
+    /// une étape suivante échoue : c'est voulu pour l'authentification, où un échec
+    /// doit rester compté et inscrit au journal.
     pub(crate) fn with_vault<T>(
         &self,
         f: impl FnOnce(&mut UnlockedVault) -> Result<T, ApiError>,
@@ -157,6 +161,17 @@ impl AppState {
             Phase::Unlocked(vault) => f(vault),
             Phase::Locked => Err(ApiError::Unauthorized),
         }
+    }
+
+    /// Exécute `f` en tout ou rien, pour les données : si une étape échoue (disque
+    /// plein, enregistrement invalide…), aucune modification ni entrée d'audit n'est
+    /// conservée. Un effacement de dossier n'est jamais laissé à moitié fait, et aucune
+    /// modification n'échappe au journal.
+    pub(crate) fn with_vault_atomic<T>(
+        &self,
+        f: impl FnOnce(&mut UnlockedVault) -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
+        self.with_vault(|vault| vault.atomic(f))
     }
 
     /// Verrouille si plus aucune session n'est active.

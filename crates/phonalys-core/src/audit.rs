@@ -79,6 +79,16 @@ pub enum AuditError {
 pub struct AuditLog {
     key: SecretKey,
     entries: Vec<AuditEntry>,
+    /// Numéro de la prochaine entrée. Égal à `entries.len()` pour une chaîne intacte ;
+    /// au-delà si des entrées ont disparu, pour ne jamais réutiliser un numéro.
+    next_seq: u64,
+}
+
+/// Point de retour d'un journal en mémoire (voir [`AuditLog::rollback`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Checkpoint {
+    len: usize,
+    next_seq: u64,
 }
 
 impl AuditLog {
@@ -86,13 +96,58 @@ impl AuditLog {
         Self {
             key,
             entries: Vec::new(),
+            next_seq: 0,
         }
     }
 
     /// Recharge un journal persistant ; refuse une chaîne altérée.
     pub fn from_entries(key: SecretKey, entries: Vec<AuditEntry>) -> Result<Self, AuditError> {
         verify_chain(&key, &entries)?;
-        Ok(Self { key, entries })
+        let next_seq = entries.len() as u64;
+        Ok(Self {
+            key,
+            entries,
+            next_seq,
+        })
+    }
+
+    /// Recharge un journal même altéré, et signale la première rupture. Les dossiers
+    /// des patients doivent rester accessibles : une altération du journal est une
+    /// alerte de sécurité à traiter, pas une raison de bloquer les soins.
+    /// `next_seq` : plus petit numéro libre (au-delà du plus grand numéro stocké).
+    pub fn recover(
+        key: SecretKey,
+        entries: Vec<AuditEntry>,
+        next_seq: u64,
+    ) -> (Self, Option<AuditError>) {
+        let broken = verify_chain(&key, &entries).err();
+        let next_seq = entries
+            .last()
+            .map_or(0, |e| e.seq.saturating_add(1))
+            .max(next_seq);
+        (
+            Self {
+                key,
+                entries,
+                next_seq,
+            },
+            broken,
+        )
+    }
+
+    /// État actuel, pour annuler les entrées ajoutées si leur écriture échoue.
+    pub fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            len: self.entries.len(),
+            next_seq: self.next_seq,
+        }
+    }
+
+    /// Retire de la mémoire les entrées ajoutées depuis `cp`, dont l'écriture sur disque
+    /// a échoué : la mémoire et le disque restent identiques.
+    pub fn rollback(&mut self, cp: Checkpoint) {
+        self.entries.truncate(cp.len);
+        self.next_seq = cp.next_seq;
     }
 
     pub fn entries(&self) -> &[AuditEntry] {
@@ -120,7 +175,7 @@ impl AuditLog {
             .last()
             .map_or_else(|| GENESIS.to_owned(), |e| e.mac.clone());
         let mut entry = AuditEntry {
-            seq: self.entries.len() as u64,
+            seq: self.next_seq,
             at,
             actor: actor.to_owned(),
             action,
@@ -129,6 +184,7 @@ impl AuditLog {
             mac: String::new(),
         };
         entry.mac = mac_of(&self.key, &entry);
+        self.next_seq += 1;
         self.entries.push(entry);
         &self.entries[self.entries.len() - 1]
     }
@@ -217,6 +273,29 @@ mod tests {
         let mut swapped = log.entries().to_vec();
         swapped.swap(1, 2);
         assert!(verify_chain(&log.key, &swapped).is_err());
+    }
+
+    #[test]
+    fn rollback_forgets_unwritten_entries() {
+        let mut log = sample();
+        let cp = log.checkpoint();
+        log.append("lp-001", AuditAction::Export, None);
+        log.rollback(cp);
+        log.append("lp-001", AuditAction::Lock, None);
+        assert_eq!(log.entries().len(), 4);
+        assert_eq!(log.verify(), Ok(()));
+    }
+
+    #[test]
+    fn recovery_keeps_entries_and_never_reuses_a_number() {
+        let log = sample();
+        let mut entries = log.entries().to_vec();
+        entries.remove(1);
+        let (mut recovered, broken) = AuditLog::recover(log.key.clone(), entries, 3);
+        assert_eq!(broken, Some(AuditError::Broken(1)));
+        assert_eq!(recovered.append("lp-001", AuditAction::Lock, None).seq, 3);
+        let (_, intact) = AuditLog::recover(log.key.clone(), log.entries().to_vec(), 0);
+        assert_eq!(intact, None);
     }
 
     #[test]
