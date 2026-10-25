@@ -7,9 +7,14 @@
 //!
 //! Pour connecter des téléphones, le praticien lance le serveur autonome
 //! (`phonalys-server`) en TLS sur le réseau du cabinet.
+//!
+//! Les mises à jour sont signalées au démarrage et installées seulement avec
+//! l'accord du praticien (voir [`update`]).
 
 // Pas de console sous Windows en version publiée.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod update;
 
 use phonalys_auth::SessionConfig;
 use phonalys_crypto::KdfParams;
@@ -108,6 +113,9 @@ fn main() {
         .init();
 
     let result = tauri::Builder::default()
+        // Utilisés depuis Rust uniquement : la page web n'a aucune permission sur eux.
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let web = web_dir(app);
             if web.is_none() {
@@ -123,6 +131,12 @@ fn main() {
                 // Aucune navigation hors du serveur embarqué (liens, redirections).
                 .on_navigation(move |target| target.origin() == allowed)
                 .build()?;
+
+            if update::enabled(app.handle(), data_dir().as_deref()) {
+                update::spawn_check(app.handle().clone());
+            } else {
+                tracing::info!("vérification des mises à jour désactivée");
+            }
             Ok(())
         })
         .run(tauri::generate_context!());

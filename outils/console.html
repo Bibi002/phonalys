@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Console Phonalys</title>
+<!--
+  Console de l'éditeur : versions publiées, téléchargements, état des signatures et des
+  mises à jour. Ouvrir ce fichier dans un navigateur (double-clic).
+
+  Source : l'API publique de GitHub pour le dépôt de téléchargement. Aucun jeton, aucun
+  pistage : les chiffres sont les compteurs anonymes que GitHub tient pour chaque fichier.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src https://api.github.com; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb; --card: #ffffff; --border: #e3e2de;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #77756f;
+    --series-1: #2a78d6; --grid: #ecebe7;
+    --good: #0f7b3e; --warn: #9a5b00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface: #1a1a19; --card: #222221; --border: #3a3a37;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a988f;
+      --series-1: #3987e5; --grid: #2e2e2c;
+      --good: #4cc27e; --warn: #e0a640;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface: #1a1a19; --card: #222221; --border: #3a3a37;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a988f;
+    --series-1: #3987e5; --grid: #2e2e2c;
+    --good: #4cc27e; --warn: #e0a640;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface); color: var(--text-primary); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+  h1 { font-size: 1.5rem; margin: 0; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  .muted { color: var(--text-secondary); }
+  .small { font-size: 0.85rem; }
+  button { font: inherit; padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text-primary); cursor: pointer; }
+  button:focus-visible, a:focus-visible { outline: 3px solid var(--series-1); outline-offset: 2px; }
+  a { color: var(--series-1); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px; }
+  .tile { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .tile .label { color: var(--text-secondary); font-size: 0.85rem; }
+  .tile .value { font-size: 1.8rem; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; margin-top: 4px; }
+  .tile .sub { color: var(--text-muted); font-size: 0.8rem; margin-top: 2px; }
+  .state { font-weight: 600; }
+  .state.ok { color: var(--good); }
+  .state.no { color: var(--warn); }
+  .chart { position: relative; }
+  .row { display: grid; grid-template-columns: 70px 1fr 64px; align-items: center; gap: 10px; padding: 4px 0; }
+  .row .ver { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  .track { position: relative; height: 22px; background: linear-gradient(to right, var(--grid) 1px, transparent 1px) 0 0 / 25% 100%; border-left: 1px solid var(--border); }
+  .bar { position: absolute; left: 0; top: 3px; bottom: 3px; background: var(--series-1); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .row .n { text-align: right; font-variant-numeric: tabular-nums; }
+  .row:hover .bar, .row:focus-within .bar { filter: brightness(1.12); }
+  .tip { position: absolute; pointer-events: none; background: var(--card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 0.85rem; box-shadow: 0 4px 14px rgba(0,0,0,.15); white-space: nowrap; z-index: 2; }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th:first-child, td:first-child, th.l, td.l { text-align: left; }
+  th { color: var(--text-secondary); font-weight: 600; font-size: 0.85rem; }
+  .error { color: var(--warn); font-weight: 600; }
+  ol { padding-left: 1.2rem; }
+  code { font-size: 0.85em; background: var(--grid); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Console Phonalys</h1>
+    <div class="muted small"><span id="updated">Chargement…</span> · <button id="refresh" type="button">Actualiser</button></div>
+  </header>
+  <p class="muted small">Données publiques de GitHub pour <a id="repo-link" href="https://github.com/Bibi002/phonalys-releases/releases">Bibi002/phonalys-releases</a>. Compteurs anonymes : personne n'est suivi, aucune donnée ne vient des cabinets.</p>
+  <p id="error" class="error" role="alert" hidden></p>
+
+  <section class="tiles" aria-label="Résumé">
+    <div class="tile"><div class="label">Téléchargements d'installateurs</div><div class="value" id="t-total">–</div><div class="sub" id="t-total-sub"></div></div>
+    <div class="tile"><div class="label">Dernière version</div><div class="value" id="t-latest">–</div><div class="sub" id="t-latest-sub"></div></div>
+    <div class="tile"><div class="label">Vérifications de mise à jour</div><div class="value" id="t-checks">–</div><div class="sub">lectures de <code>latest.json</code> de la dernière version, par les applications installées (approximatif)</div></div>
+    <div class="tile"><div class="label">État de la dernière version</div><div class="value small" id="t-state" style="font-size:1rem">–</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Téléchargements par version</h2>
+    <div class="chart" id="chart" role="img" aria-label="Téléchargements par version"></div>
+    <div class="tip" id="tip" hidden></div>
+  </section>
+
+  <section class="card">
+    <h2>Détail</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Version</th><th class="l">Publiée le</th><th>Windows</th><th>Linux</th><th>Serveur</th><th>Total</th><th class="l">Signée</th><th class="l">Mise à jour auto</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Publier une nouvelle version</h2>
+    <ol>
+      <li>Dans le dépôt privé : même numéro dans <code>Cargo.toml</code>, <code>apps/desktop/Cargo.toml</code> et <code>tauri.conf.json</code>, puis <code>git tag vX.Y.Z</code> et <code>git push origin vX.Y.Z</code>.</li>
+      <li>Attendre la construction (<a href="https://github.com/Bibi002/phonalys/actions/workflows/release.yml">Publication</a>), relire le <a href="https://github.com/Bibi002/phonalys/releases">brouillon</a> et le publier.</li>
+      <li>C'est automatique ensuite : copie vers le dépôt public (<a href="https://github.com/Bibi002/phonalys/actions/workflows/diffusion.yml">Diffusion publique</a>), signature (<a href="https://github.com/Bibi002/phonalys-releases/actions/workflows/signer.yml">Signature</a>), puis les applications installées proposent la mise à jour au démarrage suivant.</li>
+    </ol>
+    <p class="muted small">En cas de problème sur une version : publiez une version corrigée avec un numéro supérieur. Ne supprimez pas une version déjà diffusée ; les applications ne reviennent jamais à une version antérieure.</p>
+  </section>
+</main>
+<script>
+"use strict";
+const REPO = "Bibi002/phonalys-releases";
+const $ = (id) => document.getElementById(id);
+const fmt = new Intl.NumberFormat("fr-BE");
+const day = (iso) => new Date(iso).toLocaleDateString("fr-BE", { day: "numeric", month: "short", year: "numeric" });
+
+/** Catégorie d'un fichier publié ; null pour ce qui n'est pas un installateur. */
+function category(name) {
+  if (/^phonalys-server-/.test(name)) return "server";
+  if (/\.sig$|\.json$|\.txt$|\.md$/i.test(name)) return null;
+  if (/-setup\.exe$|\.msi$/i.test(name)) return "windows";
+  if (/\.(deb|rpm|AppImage)$/i.test(name)) return "linux";
+  return null;
+}
+
+function summarize(release) {
+  const s = { tag: release.tag_name, date: release.published_at, windows: 0, linux: 0, server: 0, total: 0, files: [], signed: false, manifest: null, url: release.html_url };
+  for (const a of release.assets) {
+    if (a.name === "SHA256SUMS.txt.sigstore.json") s.signed = true;
+    if (a.name === "latest.json") s.manifest = a.download_count;
+    const c = category(a.name);
+    if (!c) continue;
+    s[c] += a.download_count;
+    s.total += a.download_count;
+    s.files.push([a.name, a.download_count]);
+  }
+  return s;
+}
+
+function el(tag, props = {}, ...children) {
+  const e = document.createElement(tag);
+  Object.assign(e, props);
+  for (const c of children) e.append(c);
+  return e;
+}
+
+function state(ok, yes, no) {
+  return el("span", { className: ok ? "state ok" : "state no", textContent: ok ? "✓ " + yes : "✗ " + no });
+}
+
+function render(releases) {
+  const list = releases.filter((r) => !r.draft).map(summarize);
+  const total = list.reduce((n, r) => n + r.total, 0);
+  $("t-total").textContent = fmt.format(total);
+  $("t-total-sub").textContent = `${list.length} version(s) publiée(s)`;
+  const latest = list[0];
+  if (latest) {
+    $("t-latest").textContent = latest.tag;
+    $("t-latest-sub").textContent = `publiée le ${day(latest.date)} · ${fmt.format(latest.total)} téléchargement(s)`;
+    $("t-checks").textContent = latest.manifest === null ? "–" : fmt.format(latest.manifest);
+    $("t-state").replaceChildren(
+      state(latest.signed, "signée (Sigstore)", "pas encore signée"), el("br"),
+      state(latest.manifest !== null, "mise à jour proposée aux apps", "pas de mise à jour automatique"),
+    );
+  }
+
+  // Graphique : une barre par version, la plus récente en haut.
+  const max = Math.max(1, ...list.map((r) => r.total));
+  const chart = $("chart");
+  chart.replaceChildren();
+  for (const r of list) {
+    const bar = el("div", { className: "bar" });
+    bar.style.width = `${(r.total / max) * 100}%`;
+    const row = el("div", { className: "row", tabIndex: 0 },
+      el("span", { className: "ver", textContent: r.tag }),
+      el("div", { className: "track" }, bar),
+      el("span", { className: "n", textContent: fmt.format(r.total) }));
+    row.setAttribute("aria-label", `${r.tag} : ${r.total} téléchargements (Windows ${r.windows}, Linux ${r.linux}, serveur ${r.server})`);
+    const show = (x, y) => tooltip(r, x, y);
+    row.addEventListener("mousemove", (e) => show(e.clientX, e.clientY));
+    row.addEventListener("focus", () => { const b = row.getBoundingClientRect(); show(b.left + b.width / 2, b.top); });
+    row.addEventListener("mouseleave", hideTip);
+    row.addEventListener("blur", hideTip);
+    chart.append(row);
+  }
+  if (!list.length) chart.append(el("p", { className: "muted", textContent: "Aucune version publiée." }));
+
+  // Tableau
+  $("rows").replaceChildren(...list.map((r) => el("tr", {},
+    el("td", {}, el("a", { href: r.url, textContent: r.tag })),
+    el("td", { className: "l", textContent: day(r.date) }),
+    el("td", { textContent: fmt.format(r.windows) }),
+    el("td", { textContent: fmt.format(r.linux) }),
+    el("td", { textContent: fmt.format(r.server) }),
+    el("td", { textContent: fmt.format(r.total) }),
+    el("td", { className: "l" }, state(r.signed, "oui", "non")),
+    el("td", { className: "l" }, state(r.manifest !== null, "oui", "non")),
+  )));
+}
+
+function tooltip(r, x, y) {
+  const tip = $("tip");
+  const box = $("chart").parentElement.getBoundingClientRect();
+  tip.replaceChildren(el("strong", { textContent: r.tag }), el("br"),
+    `Windows : ${fmt.format(r.windows)}`, el("br"),
+    `Linux : ${fmt.format(r.linux)}`, el("br"),
+    `Serveur : ${fmt.format(r.server)}`);
+  tip.hidden = false;
+  const left = Math.min(x - box.left + 14, box.width - tip.offsetWidth - 8);
+  tip.style.left = `${Math.max(8, left)}px`;
+  tip.style.top = `${y - box.top + 14}px`;
+}
+function hideTip() { $("tip").hidden = true; }
+
+async function load() {
+  $("error").hidden = true;
+  $("updated").textContent = "Chargement…";
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`, { headers: { accept: "application/vnd.github+json" } });
+    if (res.status === 403 || res.status === 429) throw new Error("GitHub limite les consultations anonymes (60 par heure) : réessayez plus tard.");
+    if (!res.ok) throw new Error(`GitHub a répondu ${res.status}.`);
+    render(await res.json());
+    $("updated").textContent = `Actualisé à ${new Date().toLocaleTimeString("fr-BE", { hour: "2-digit", minute: "2-digit" })}`;
+  } catch (e) {
+    $("error").textContent = e instanceof TypeError ? "GitHub injoignable : vérifiez la connexion Internet." : e.message;
+    $("error").hidden = false;
+    $("updated").textContent = "Échec";
+  }
+}
+
+$("refresh").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>

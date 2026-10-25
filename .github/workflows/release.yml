@@ -66,7 +66,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: apps/desktop
-      - run: cargo install tauri-cli --version "^2" --locked
+      - run: cargo install tauri-cli --version "=2.12.1" --locked
       # Signature Authenticode : uniquement si le titulaire a déposé son certificat dans
       # les secrets du dépôt (WINDOWS_CERTIFICATE en base64, WINDOWS_CERTIFICATE_PASSWORD).
       - name: Préparer la signature (Windows)
@@ -90,11 +90,20 @@ jobs:
         shell: bash
         env:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          # Clé de signature des mises à jour, générée et déposée par le titulaire.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # linuxdeploy (AppImage) sans FUSE sur les machines de CI.
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           extra=()
           if [ -f "$RUNNER_TEMP/signature.json" ]; then extra=(--config "$RUNNER_TEMP/signature.json"); fi
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo '{"bundle":{"createUpdaterArtifacts":true}}' > "$RUNNER_TEMP/updater.json"
+            extra+=(--config "$RUNNER_TEMP/updater.json")
+          else
+            echo "::warning::Aucune clé TAURI_SIGNING_PRIVATE_KEY : pas de mise à jour automatique pour cette version."
+          fi
           cargo tauri build --bundles ${{ matrix.bundles }} "${extra[@]}" -- --locked
       - name: Effacer le certificat
         if: always() && runner.os == 'Windows'
@@ -110,6 +119,7 @@ jobs:
             apps/desktop/target/release/bundle/deb/*.deb
             apps/desktop/target/release/bundle/rpm/*.rpm
             apps/desktop/target/release/bundle/appimage/*.AppImage
+            apps/desktop/target/release/bundle/*/*.sig
 
   server:
     name: Serveur autonome (${{ matrix.os }})
@@ -180,6 +190,36 @@ jobs:
           find . -mindepth 1 -type d -empty -delete
           if [ -n "$(find . -mindepth 1 -type d)" ]; then echo "Fichiers en double" >&2; exit 1; fi
           ls -l
+      # Manifeste lu par les applications installées (page publique des versions).
+      # Chaque signature doit porter la version : l'application refuse sinon
+      # (protection contre le retour à une ancienne version).
+      - name: Manifeste de mise à jour
+        working-directory: dist
+        env:
+          PUBLIC_REPO: Bibi002/phonalys-releases
+        run: |
+          shopt -s nullglob
+          sigs=(*.sig)
+          if [ ${#sigs[@]} -eq 0 ]; then echo "Pas de signature de mise à jour : manifeste non produit."; exit 0; fi
+          version="${GITHUB_REF_NAME#v}"
+          base="https://github.com/$PUBLIC_REPO/releases/download/$GITHUB_REF_NAME"
+          platforms="{}"
+          for sig in "${sigs[@]}"; do
+            file="${sig%.sig}"
+            case "$file" in
+              *-setup.exe) key=windows-x86_64-nsis ;;
+              *.msi) key=windows-x86_64-msi ;;
+              *.AppImage) key=linux-x86_64-appimage ;;
+              *.deb) key=linux-x86_64-deb ;;
+              *.rpm) key=linux-x86_64-rpm ;;
+              *) echo "Signature inattendue : $sig" >&2; exit 1 ;;
+            esac
+            comment=$(base64 -d "$sig" | sed -n 3p)
+            case "$comment" in *"version:$version"*) ;; *) echo "Version absente ou différente dans $sig : $comment" >&2; exit 1 ;; esac
+            platforms=$(jq --arg k "$key" --arg u "$base/$file" --arg s "$(cat "$sig")" '. + {($k): {url: $u, signature: $s}}' <<<"$platforms")
+          done
+          jq -n --arg v "$version" --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)"             --arg n "Nouvelle version de Phonalys. Détails : https://github.com/$PUBLIC_REPO/releases/tag/$GITHUB_REF_NAME"             --argjson p "$platforms" '{version: $v, notes: $n, pub_date: $d, platforms: $p}' > latest.json
+          cat latest.json
       - name: Empreintes SHA-256
         working-directory: dist
         run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt

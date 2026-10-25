@@ -78,6 +78,14 @@ Le serveur s'installe sur la machine qui reste allumée au cabinet (PC fixe, min
 
 N'ouvrez jamais le port 8443 vers Internet. Pour un accès à distance, utilisez un VPN (WireGuard, par exemple).
 
+## Mises à jour
+
+Au démarrage, l'application de bureau vérifie s'il existe une nouvelle version sur la page publique des versions. Si c'est le cas, elle le signale : **rien ne s'installe sans votre accord** (« Installer maintenant » ou « Plus tard »). La mise à jour est vérifiée par signature avant l'installation, puis Phonalys redémarre ; vos données ne sont pas touchées.
+
+Cette vérification n'envoie aucune information sur le cabinet. Pour la désactiver (poste géré par un informaticien), créez un fichier vide nommé `mises-a-jour-desactivees` dans le dossier de données (`%LOCALAPPDATA%Phonalys` ou `~/.local/share/Phonalys`).
+
+Les paquets `.deb` et `.rpm` et le serveur du cabinet se mettent à jour en installant la nouvelle version par-dessus l'ancienne. Les versions 0.1.0 et 0.1.1 ne savent pas encore se mettre à jour : installez une fois la version suivante à la main.
+
 ## 5. Sauvegardes
 
 Une sauvegarde chiffrée est créée automatiquement chaque jour d'utilisation et testée aussitôt. Dans « Sauvegardes », indiquez un **second dossier** (clé USB, NAS) pour en garder une copie ailleurs. Une sauvegarde s'ouvre avec la phrase de passe en vigueur au moment où elle a été faite.

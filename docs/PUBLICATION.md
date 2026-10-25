@@ -8,8 +8,9 @@ Le workflow « Publication » (`.github/workflows/release.yml`) construit :
 | `.deb`, `.rpm`, `.AppImage` | Application de bureau Linux |
 | `phonalys-server-X.Y.Z-windows-x64.zip`, `…-linux-x64.tar.gz` | Serveur autonome du cabinet, pour les téléphones et tablettes |
 | `SHA256SUMS.txt` | Empreintes de tous les fichiers |
+| `*.sig`, `latest.json` | Signatures et manifeste des mises à jour (si la clé est configurée) |
 
-Il crée un **brouillon** de release : rien n'est visible tant que vous ne l'avez pas relu et publié.
+Il crée un **brouillon** de release : rien n'est visible tant que vous ne l'avez pas relu et publié. Si la clé de mise à jour est configurée, il produit aussi les signatures `.sig` et le manifeste `latest.json`.
 
 ## Étapes
 
@@ -23,20 +24,57 @@ Il crée un **brouillon** de release : rien n'est visible tant que vous ne l'ave
 
 Pour un essai sans rien publier : *Actions › Publication › Run workflow*. Les fichiers sont alors téléchargeables comme artefacts du workflow.
 
-## Diffusion publique
+## Diffusion publique, signature et mises à jour
 
-Le code source reste dans le dépôt **privé** `Bibi002/phonalys`. Les installateurs sont rendus publics dans un dépôt séparé, **`Bibi002/phonalys-releases`** (page de présentation, licence, guide, politique de sécurité, sans aucun code source). Lien à donner aux praticiens : https://github.com/Bibi002/phonalys-releases/releases/latest
+Le code source reste dans le dépôt **privé** `Bibi002/phonalys`. Les installateurs sont publiés dans le dépôt **public** `Bibi002/phonalys-releases` (présentation, licence, guide, politique de sécurité, aucun code source). Lien à donner aux praticiens : https://github.com/Bibi002/phonalys-releases/releases/latest
 
-Après avoir publié une version dans le dépôt privé, copiez-la vers le dépôt public en vérifiant les empreintes :
+Une fois la version publiée dans le dépôt privé, tout s'enchaîne automatiquement :
+
+1. **Diffusion publique** (`.github/workflows/diffusion.yml`) : copie de la version vers le dépôt public, après vérification des empreintes.
+2. **Signature** (workflow `signer.yml` du dépôt public) : signature Sigstore de `SHA256SUMS.txt` et attestation de provenance GitHub pour chaque fichier. C'est gratuit, sans limite, et aucun secret n'est à conserver.
+3. **Mises à jour** : le fichier `latest.json` de la version est lu au démarrage par les applications installées, qui proposent d'installer la nouvelle version.
+
+**Console** : ouvrez `outils/console.html` dans un navigateur. Elle affiche les versions, les téléchargements par version et par système, l'état des signatures et des mises à jour, ainsi que le nombre de vérifications de mise à jour (compteur anonyme de GitHub, sans aucun pistage).
+
+### Mise en place (une seule fois, par le titulaire)
+
+Ces trois secrets ne doivent être vus par personne d'autre que vous. Tapez les commandes dans **votre** terminal PowerShell (pas dans une conversation).
+
+**1. Clé de signature des mises à jour.** Choisissez une phrase de passe quand elle est demandée et conservez-la dans votre gestionnaire de mots de passe :
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.phonalys" | Out-Null
+npx --yes @tauri-apps/cli@2.12.1 signer generate -w "$env:USERPROFILE\.phonalys\mises-a-jour.key"
+Get-Content "$env:USERPROFILE\.phonalys\mises-a-jour.key" -Raw | gh secret set TAURI_SIGNING_PRIVATE_KEY -R Bibi002/phonalys
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD -R Bibi002/phonalys
+```
+
+Gardez une copie de `mises-a-jour.key` **hors ligne** (clé USB rangée en lieu sûr). Si elle est perdue, les applications installées ne pourront plus être mises à jour automatiquement. Si elle est volée, quelqu'un pourrait signer une fausse mise à jour : changez-la et publiez une nouvelle version au plus vite. La clé **publique** (`mises-a-jour.key.pub`) n'est pas secrète : elle va dans `apps/desktop/tauri.conf.json` (`plugins.updater.pubkey`).
+
+**2. Jeton de diffusion vers le dépôt public.** Créez un jeton sur https://github.com/settings/personal-access-tokens/new :
+- *Repository access* : **Only select repositories** › `phonalys-releases` ;
+- *Permissions* › *Repository permissions* › **Contents : Read and write** (rien d'autre) ;
+- une date d'expiration, par exemple un an, à renouveler.
+
+```powershell
+gh secret set PUBLIC_RELEASES_TOKEN -R Bibi002/phonalys
+```
+
+Si le jeton est absent ou a expiré, le workflow « Diffusion publique » échoue sans rien publier ; il se relance à la main (*Actions › Diffusion publique › Run workflow*).
+
+### Copie manuelle (secours)
 
 ```powershell
 $v = "0.1.1"; $d = "$env:TEMP\phonalys-$v"
-gh release download "v$v" -R Bibi002/phonalys -D $d -p "Phonalys*" -p "phonalys-server*" -p "SHA256SUMS.txt"
-# Chaque fichier doit correspondre à SHA256SUMS.txt :
+gh release download "v$v" -R Bibi002/phonalys -D $d
 Get-Content "$d\SHA256SUMS.txt" | % { $h, $n = $_ -split '\s+', 2; if ((Get-FileHash "$d\$n").Hash -ne $h) { throw "Empreinte différente : $n" } }
 Copy-Item docs\INSTALLATION.md $d
 gh release create "v$v" -R Bibi002/phonalys-releases --title "Phonalys $v" --notes-file notes.md --latest (Get-ChildItem $d -File).FullName
 ```
+
+### Microsoft Store (facultatif)
+
+Le Store signe lui-même l'application (paquet MSIX) : c'est la seule façon gratuite de supprimer l'avertissement SmartScreen. Il faut un compte développeur Microsoft (gratuit pour un particulier, avec vérification d'identité) : https://storedeveloper.microsoft.com. Une fois le compte créé, relevez dans *Partner Center › Gestion du produit › Identité du produit* les valeurs **Package/Identity/Name** et **Package/Identity/Publisher** : elles sont nécessaires pour produire le paquet MSIX.
 
 ## Signature des installateurs Windows (à faire par le titulaire)
 
@@ -62,10 +100,6 @@ Le mode actuel par fichier `.pfx` (secrets `WINDOWS_CERTIFICATE` et `WINDOWS_CER
 
 ## Ce qui reste à faire
 
-- **Mises à jour automatiques** : pas encore intégrées, volontairement. Il vous faut d'abord trancher deux points :
-  1. **Où publier les mises à jour.** Le dépôt public `Bibi002/phonalys-releases` peut servir d'adresse : il faudra y publier aussi le fichier `latest.json` produit par Tauri.
-  2. **Automatique ou manuel.** Pour un logiciel qui garde des dossiers de santé, une mise à jour silencieuse est un risque autant qu'une protection : si votre compte de publication est compromis, tous les cabinets reçoivent le code de l'attaquant. Proposition : l'application **signale** la nouvelle version et le praticien choisit quand l'installer.
-
-  Une fois ces choix faits, il restera à générer la paire de clés de signature des mises à jour (`cargo tauri signer generate`) : vous la générez, la clé privée va seulement dans un secret du dépôt, la clé publique dans `tauri.conf.json`. Ensuite, le plugin `tauri-plugin-updater` peut être branché.
+- **Mises à jour des paquets `.deb` et `.rpm` et du serveur du cabinet** : manuelles (installer la nouvelle version par-dessus). L'AppImage et les installateurs Windows se mettent à jour depuis l'application.
 - **Paquets Linux** : non signés. Vérifier l'empreinte avec `sha256sum -c SHA256SUMS.txt`.
 - **Attestation de provenance (SLSA)** : elle n'est produite que si le dépôt qui construit est public (ou avec GitHub Enterprise Cloud). Le code restant privé, les empreintes SHA-256 font foi.
