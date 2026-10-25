@@ -19,6 +19,11 @@ allow = [
 ]
 confidence-threshold = 0.9
 private = { ignore = true }
+# Liste des certificats racines (données Mozilla), utilisée par le téléchargement des
+# mises à jour : licence de données permissive, compatible avec un usage commercial.
+exceptions = [
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
+]
 
 [bans]
 multiple-versions = "warn"
