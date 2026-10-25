@@ -25,7 +25,9 @@ url = "2"
 serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tauri-plugin-updater = "=2.13.1"
+# Sans la fonction « zip » : les mises à jour sont les installateurs eux-mêmes (pas
+# d'archive), et zip 4.x porte RUSTSEC-2026-0367 à 0369.
+tauri-plugin-updater = { version = "=2.13.1", default-features = false, features = ["rustls-tls", "system-proxy"] }
 tauri-plugin-dialog = "=2.8.1"
 
 [lints.rust]
