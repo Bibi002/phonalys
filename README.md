@@ -6,6 +6,27 @@ Phonalys s'adresse aux logopèdes indépendants. Le praticien fait passer ses é
 
 > Logiciel propriétaire : voir [LICENSE](LICENSE). Toute reproduction est interdite.
 
+## Aperçu
+
+Captures de la version 0.1.3. Tous les patients sont fictifs.
+
+![Application de bureau Windows : accueil, séances du jour et alertes de sauvegarde](docs/captures/07-bureau-accueil.jpg)
+
+| | |
+|---|---|
+| ![Agenda de la semaine](docs/captures/08-bureau-agenda.jpg) | ![Dossier patient](docs/captures/05-dossier-patient.jpg) |
+| **Agenda** : séances de la semaine, absences signalées. | **Dossier patient** : identité, anamnèse, prise en charge, séances, bilans, objectifs, exercices et documents. |
+| ![Évolution entre deux bilans](docs/captures/06-evolution-bilans.jpg) | ![Exercices de rééducation](docs/captures/09-bureau-exercices.jpg) |
+| **Évolution entre les bilans** : percentiles, notes standard et scores z ramenés sur une même échelle. | **Exercices** : métaphonologie, lexique, suivi de la progression du patient. |
+| ![Sécurité](docs/captures/10-bureau-securite.jpg) | ![Journal d'audit](docs/captures/12-bureau-journal.jpg) |
+| **Sécurité** : clés biométriques (Windows Hello, Face ID, YubiKey), mode lié au matériel. | **Journal d'audit** chaîné par HMAC : toute altération est détectée. |
+| ![Sauvegardes chiffrées](docs/captures/11-bureau-sauvegardes.jpg) | ![Conformité RGPD](docs/captures/13-bureau-conformite.jpg) |
+| **Sauvegardes** chiffrées, testées par une restauration automatique. | **Conformité** : registre des traitements, notice patients, violations, analyse d'impact. |
+| ![Liste des patients](docs/captures/04-patients.jpg) | ![Connexion à double facteur](docs/captures/02-connexion.jpg) |
+| **Patients** : recherche et suivi par statut. | **Connexion** : phrase de passe et second facteur, ou clé biométrique. |
+
+![Installation : création du coffre chiffré](docs/captures/01-installation.jpg)
+
 ## Principes
 
 1. **Les données restent chez le praticien.** Aucun serveur central ni compte hébergé par l'éditeur, et aucune télémétrie.
