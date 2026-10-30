@@ -14,6 +14,25 @@ dist/
 *.key
 *.p12
 *.pfx
+*.sqlite3
+*.crt
+*.cer
+*.der
+*.jks
+*.kdbx
+*.age
+*.gpg
 .env
 .env.*
 /data/
+/secrets/
+/sauvegardes/
+*.phonalys-backup
+
+# Système et éditeurs
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
