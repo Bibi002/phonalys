@@ -368,5 +368,26 @@ mod tests {
             blob[i] ^= 1 << bit;
             prop_assert!(open(&key, &blob, b"").is_err());
         }
+
+        /// Fichier corrompu, tronqué ou forgé : refus propre, jamais de panique.
+        #[test]
+        fn arbitrary_bytes_are_rejected(blob in proptest::collection::vec(any::<u8>(), 0..512),
+                                        aad in proptest::collection::vec(any::<u8>(), 0..32)) {
+            let key = SecretKey::generate();
+            prop_assert!(open(&key, &blob, &aad).is_err());
+            prop_assert!(unwrap_key(&key, &blob, &aad).is_err());
+        }
+
+        #[test]
+        fn wrapped_key_is_bound_to_its_context(ctx in proptest::collection::vec(any::<u8>(), 0..32),
+                                               other in proptest::collection::vec(any::<u8>(), 0..32)) {
+            prop_assume!(ctx != other);
+            let wrapping = SecretKey::generate();
+            let key = SecretKey::generate();
+            let wrapped = wrap_key(&wrapping, &key, &ctx).unwrap();
+            let opened = unwrap_key(&wrapping, &wrapped, &ctx).unwrap();
+            prop_assert_eq!(opened.as_bytes(), key.as_bytes());
+            prop_assert!(unwrap_key(&wrapping, &wrapped, &other).is_err());
+        }
     }
 }
