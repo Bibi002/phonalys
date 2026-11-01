@@ -26,7 +26,7 @@ Pour un essai sans rien publier : *Actions › Publication › Run workflow*. Le
 
 ## Diffusion publique, signature et mises à jour
 
-Le code source reste dans le dépôt **privé** `Bibi002/phonalys`. Les installateurs sont publiés dans le dépôt **public** `Bibi002/phonalys-releases` (présentation, licence, guide, politique de sécurité, aucun code source). Lien à donner aux praticiens : https://github.com/Bibi002/phonalys-releases/releases/latest
+Le code source est consultable dans le dépôt **public** `Bibi002/phonalys`, sous licence propriétaire. Les installateurs sont publiés dans le dépôt **public** `Bibi002/phonalys-releases` (présentation, captures, licence, guide, politique de sécurité). Lien à donner aux praticiens : https://github.com/Bibi002/phonalys-releases/releases/latest
 
 Une fois la version publiée dans le dépôt privé, tout s'enchaîne automatiquement :
 
@@ -65,7 +65,7 @@ Si le jeton est absent ou a expiré, le workflow « Diffusion publique » échou
 ### Copie manuelle (secours)
 
 ```powershell
-$v = "0.1.3"; $d = "$env:TEMP\phonalys-$v"
+$v = "0.1.4"; $d = "$env:TEMP\phonalys-$v"
 gh release download "v$v" -R Bibi002/phonalys -D $d
 Get-Content "$d\SHA256SUMS.txt" | % { $h, $n = $_ -split '\s+', 2; if ((Get-FileHash "$d\$n").Hash -ne $h) { throw "Empreinte différente : $n" } }
 Copy-Item docs\INSTALLATION.md $d
@@ -102,4 +102,4 @@ Le mode actuel par fichier `.pfx` (secrets `WINDOWS_CERTIFICATE` et `WINDOWS_CER
 
 - **Mises à jour des paquets `.deb` et `.rpm` et du serveur du cabinet** : manuelles (installer la nouvelle version par-dessus). L'AppImage et les installateurs Windows se mettent à jour depuis l'application.
 - **Paquets Linux** : non signés. Vérifier l'empreinte avec `sha256sum -c SHA256SUMS.txt`.
-- **Attestation de provenance (SLSA)** : elle n'est produite que si le dépôt qui construit est public (ou avec GitHub Enterprise Cloud). Le code restant privé, les empreintes SHA-256 font foi.
+- **Attestation de provenance (SLSA)** : produite depuis la 0.1.4, le dépôt qui construit étant public. Vérification : `gh attestation verify <fichier> -R Bibi002/phonalys`.
